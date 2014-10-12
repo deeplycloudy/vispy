@@ -33,6 +33,7 @@ def use(app=None, gl=None):
     app : str
         The app backend to use (case insensitive). Standard backends:
             * 'PyQt4': use Qt widget toolkit via PyQt4.
+            * 'PyQt5': use Qt widget toolkit via PyQt5.
             * 'PySide': use Qt widget toolkit via PySide.
             * 'PyGlet': use Pyglet backend.
             * 'Glfw': use Glfw backend (successor of Glut). Widely available
@@ -68,6 +69,8 @@ def use(app=None, gl=None):
     'default_backend' provided in the vispy config. If still not
     succesful, it will try each backend in a predetermined order.
     """
+    if app is None and gl is None:
+        raise TypeError('Must specify at least one of "app" or "gl".')
 
     # Example for future. This wont work (yet).
     if app == 'ipynb_webgl':
@@ -83,25 +86,7 @@ def use(app=None, gl=None):
         vispy.gloo.gl.use_gl(gl)
 
 
-# Define test proxy function, so we don't have to import vispy.testing always
-def test(label='full', coverage=False, verbosity=1, *extra_args):
-    """Test vispy software
-
-    Parameters
-    ----------
-    label : str
-        Can be one of 'full', 'nose', 'nobackend', 'extra', 'lineendings',
-        'flake', or any backend name (e.g., 'qt').
-    coverage : bool
-        Produce coverage outputs (.coverage file).
-    verbosity : int
-        Verbosity level to use when running ``nose``.
-    """
-    from ..testing import _tester
-    return _tester(label, coverage, verbosity, extra_args)
-
-
-def run_subprocess(command):
+def run_subprocess(command, return_code=False, **kwargs):
     """Run command using subprocess.Popen
 
     Run command and wait for command to complete. If the return code was zero
@@ -113,6 +98,12 @@ def run_subprocess(command):
     ----------
     command : list of str
         Command to run as subprocess (see subprocess.Popen documentation).
+    return_code : bool
+        If True, the returncode will be returned, and no error checking
+        will be performed (so this function should always return without
+        error).
+    **kwargs : dict
+        Additional kwargs to pass to ``subprocess.Popen``.
 
     Returns
     -------
@@ -120,15 +111,19 @@ def run_subprocess(command):
         Stdout returned by the process.
     stderr : str
         Stderr returned by the process.
+    code : int
+        The command exit code. Only returned if ``return_code`` is True.
     """
     # code adapted with permission from mne-python
-    kwargs = dict(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+    use_kwargs = dict(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+    use_kwargs.update(kwargs)
 
-    p = subprocess.Popen(command, **kwargs)
+    p = subprocess.Popen(command, **use_kwargs)
     stdout_, stderr = p.communicate()
-
+    stdout_ = stdout_.decode('utf-8') if stdout_ is not None else ''
+    stderr = stderr.decode('utf-8') if stderr is not None else ''
     output = (stdout_, stderr)
-    if p.returncode:
+    if not return_code and p.returncode:
         print(stdout_)
         print(stderr)
         err_fun = subprocess.CalledProcessError.__init__
@@ -136,5 +131,6 @@ def run_subprocess(command):
             raise subprocess.CalledProcessError(p.returncode, command, output)
         else:
             raise subprocess.CalledProcessError(p.returncode, command)
-
+    if return_code:
+        output = output + (p.returncode,)
     return output

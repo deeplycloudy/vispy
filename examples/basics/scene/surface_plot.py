@@ -16,9 +16,9 @@ from vispy.util.filter import gaussian_filter
 
 
 canvas = scene.SceneCanvas(keys='interactive')
-canvas.show()
 view = canvas.central_widget.add_view()
-view.set_camera('turntable', mode='perspective', up='z', distance=2)
+view.set_camera('turntable', mode='perspective', up='z', distance=2,
+                azimuth=30., elevation=30.)
 
 ## Simple surface plot example
 ## x, y values are not specified, so assumed to be 0:50
@@ -33,5 +33,7 @@ view.add(p1)
 # Add a 3D axis to keep us oriented
 axis = scene.visuals.XYZAxis(parent=view.scene)
 
-if sys.flags.interactive == 0:
-    app.run()
+if __name__ == '__main__':
+    canvas.show()
+    if sys.flags.interactive == 0:
+        app.run()

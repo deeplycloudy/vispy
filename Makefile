@@ -37,8 +37,8 @@ nosetests: nose # alias
 nose: clean-test
 	python make test nose
 
-nose_coverage: clean-test
-	python make test nose 1
+examples: clean-test
+	python make test examples
 
 coverage_html:
 	python make coverage_html

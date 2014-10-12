@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2014, Vispy Development Team.
+# Distributed under the (new) BSD License. See LICENSE.txt for more info.
 """ Tests to ensure that base vispy namespace functions correctly,
 including configuration options.
 """
@@ -5,7 +8,7 @@ including configuration options.
 from nose.tools import assert_raises, assert_equal, assert_not_equal
 
 import vispy.app
-from vispy.testing import requires_application
+from vispy.testing import requires_application, run_tests_if_main
 
 
 @requires_application('pyside')
@@ -20,7 +23,7 @@ def test_use():
     
     try:
         # With no arguments, should do nothing
-        vispy.use()
+        assert_raises(TypeError, vispy.use)
         assert_equal(vispy.app._default_app.default_app, None)
         
         # With only gl args, should do nothing to app
@@ -41,3 +44,6 @@ def test_use():
     finally:
         # Restore
         vispy.app._default_app.default_app = default_app
+
+
+run_tests_if_main()

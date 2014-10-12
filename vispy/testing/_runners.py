@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# vispy: testskip
 # Copyright (c) 2014, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 """Test running functions"""
@@ -8,13 +9,15 @@ from __future__ import print_function
 import sys
 import os
 from os import path as op
-from subprocess import Popen
 from copy import deepcopy
 from functools import partial
 
-from ..util import use_log_level
+from ..util import use_log_level, run_subprocess
 from ..util.ptime import time
-from ._testing import SkipTest, has_backend
+from ._testing import SkipTest, has_backend, has_application, nottest
+
+
+_line_sep = '-' * 70
 
 
 def _get_root_dir():
@@ -28,7 +31,53 @@ def _get_root_dir():
     return root_dir, dev
 
 
-def _nose(mode, verbosity, coverage, extra_args):
+_nose_script = """
+# Code inspired by original nose plugin:
+# https://nose.readthedocs.org/en/latest/plugins/cover.html
+
+import nose
+from nose.plugins.base import Plugin
+
+
+class MutedCoverage(Plugin):
+    '''Make a silent coverage report using Ned Batchelder's coverage module.'''
+
+    def configure(self, options, conf):
+        Plugin.configure(self, options, conf)
+        self.enabled = True
+        try:
+            from coverage import coverage
+        except ImportError:
+            self.enabled = False
+            self.cov = None
+            print('Module "coverage" not installed, code coverage will not '
+                  'be available')
+        else:
+            self.enabled = True
+            self.cov = coverage(auto_data=False, branch=True, data_suffix=None,
+                                source=['vispy'])
+
+    def begin(self):
+        self.cov.load()
+        self.cov.start()
+
+    def report(self, stream):
+        self.cov.stop()
+        self.cov.combine()
+        self.cov.save()
+
+
+try:
+    import faulthandler
+    faulthandler.enable()
+except Exception:
+    pass
+
+nose.main(argv=%r%s)
+"""
+
+
+def _nose(mode, extra_arg_string):
     """Run nosetests using a particular mode"""
     cwd = os.getcwd()  # this must be done before nose import
     try:
@@ -36,47 +85,49 @@ def _nose(mode, verbosity, coverage, extra_args):
     except ImportError:
         print('Skipping nosetests, nose not installed')
         raise SkipTest()
-    extra = ('-' * 70)
+
     if mode == 'nobackend':
-        print(extra + '\nRunning tests with no backend')
-        attrs = '-a !vispy_app_test '
-        app_import = ''
+        msg = 'Running tests with no backend'
+        extra_arg_string = '-a !vispy_app_test ' + extra_arg_string
+        coverage = True
+    elif mode == 'singlefile':
+        fname = extra_arg_string.split(' ')[0]
+        assert op.isfile(fname)
+        msg = 'Running tests for individual file'
+        coverage = False
     else:
         with use_log_level('warning', print_msg=False):
             has, why_not = has_backend(mode, out=['why_not'])
-        if has:
-            print('%s\nRunning tests with %s backend' % (extra, mode))
-            attrs = '-a vispy_app_test '
-        else:
+        if not has:
             msg = ('Skipping tests for backend %s, not found (%s)'
                    % (mode, why_not))
-            print(extra + '\n' + msg + '\n' + extra + '\n')  # last \n nicer
+            print(_line_sep + '\n' + msg + '\n' + _line_sep + '\n')
             raise SkipTest(msg)
-        app_import = '\nfrom vispy import use\nuse(app="%s")\n' % mode
-    sys.stdout.flush()
-    # we might as well always use coverage, since we manually disable printing!
-    # here we actually read in the Python code to avoid importing it from
-    # from vispy.testing._coverage, since doing so breaks some path stuff later
-    muted_file = op.join(op.dirname(__file__), '_coverage.py')
-    with open(muted_file, 'r') as fid:
-        imps = fid.read()
-    cv = ', addplugins=[MutedCoverage()]'
-    # if not coverage:
-    #    imps = ''
-    #    cv = ''
-    arg = (' ' + ('--verbosity=%s ' % verbosity) + attrs +
-           ' '.join(str(e) for e in extra_args))
+        msg = 'Running tests with %s backend' % mode
+        extra_arg_string = '-a vispy_app_test ' + extra_arg_string
+        coverage = True
+    coverage = ', addplugins=[MutedCoverage()]' if coverage else ''
+    args = ['nosetests'] + extra_arg_string.strip().split(' ')
     # make a call to "python" so that it inherits whatever the system
     # thinks is "python" (e.g., virtualenvs)
-    cmd = [sys.executable, '-c',
-           '%s%simport nose; nose.main(argv="%s".split(" ")%s)'
-           % (imps, app_import, arg, cv)]
+    cmd = [sys.executable, '-c', _nose_script % (args, coverage)]
     env = deepcopy(os.environ)
-    env.update(dict(_VISPY_TESTING_TYPE=mode))
-    p = Popen(cmd, cwd=cwd, env=env)
-    stdout, stderr = p.communicate()
-    if(p.returncode):
-        raise RuntimeError('Nose failure (%s):\n%s' % (p.returncode, stderr))
+    if mode in ('singlefile',):
+        env_str = ''
+    else:
+        # We want to set this for all app backends plus "nobackend" to
+        # help ensure that app tests are appropriately decorated
+        env.update(dict(_VISPY_TESTING_APP=mode))
+        env_str = '_VISPY_TESTING_APP=%s ' % mode
+    if len(msg) > 0:
+        msg = ('%s\n%s:\n%s%s'
+               % (_line_sep, msg, env_str, ' '.join(args)))
+        print(msg)
+    sys.stdout.flush()
+    return_code = run_subprocess(cmd, return_code=True, cwd=cwd, env=env,
+                                 stdout=None, stderr=None)[2]
+    if return_code:
+        raise RuntimeError('Nose failure (%s)' % return_code)
 
 
 def _flake():
@@ -91,7 +142,7 @@ def _flake():
     sys.argv.append('--ignore=E226,E241,E265,W291,W293')
     sys.argv.append('--exclude=six.py,py24_ordereddict.py,glfw.py,'
                     '_proxy.py,_angle.py,_desktop.py,_pyopengl.py,'
-                    '_constants.py,png.py')
+                    '_constants.py,png.py,decorator.py')
     try:
         from flake8.main import main
     except ImportError:
@@ -131,7 +182,8 @@ def _check_line_endings():
             relfilename = op.relpath(filename, root_dir)
             # Open and check
             try:
-                text = open(filename, 'rb').read().decode('utf-8')
+                with open(filename, 'rb') as fid:
+                    text = fid.read().decode('utf-8')
             except UnicodeDecodeError:
                 continue  # Probably a binary file
             crcount = text.count('\r')
@@ -146,17 +198,117 @@ def _check_line_endings():
                            % (len(report), '\n'.join(report)))
 
 
-def _tester(label='full', coverage=False, verbosity=1, extra_args=()):
-    """Test vispy software. See vispy.test()
+_script = """
+import sys
+import time
+import warnings
+try:
+    import faulthandler
+    faulthandler.enable()
+except Exception:
+    pass
+import {0}
+
+if hasattr({0}, 'canvas'):
+    canvas = {0}.canvas
+elif hasattr({0}, 'Canvas'):
+    canvas = {0}.Canvas()
+else:
+    raise RuntimeError('Bad example formatting: fix or add to exclude list')
+
+with canvas as c:
+    for _ in range(30):
+        c.update()
+        c.app.process_events()
+        time.sleep(1./60.)
+"""
+
+
+def _examples():
+    """Run all examples and make sure they work
+    """
+    root_dir, dev = _get_root_dir()
+    reason = None
+    if not dev:
+        reason = 'Cannot test examples unless in vispy git directory'
+    else:
+        with use_log_level('warning', print_msg=False):
+            good, backend = has_application(capable=('multi_window',))
+        if not good:
+            reason = 'Must have suitable app backend'
+    if reason is not None:
+        msg = 'Skipping example test: %s' % reason
+        print(msg)
+        raise SkipTest(msg)
+    fnames = [op.join(d[0], fname)
+              for d in os.walk(op.join(root_dir, 'examples'))
+              for fname in d[2] if fname.endswith('.py')]
+    fnames = sorted(fnames, key=lambda x: x.lower())
+    print(_line_sep + '\nRunning %s examples using %s backend'
+          % (len(fnames), backend))
+    op.join('tutorial', 'app', 'shared_context.py'),  # non-standard
+
+    fails = []
+    n_ran = n_skipped = 0
+    t0 = time()
+    for fname in fnames:
+        n_ran += 1
+        root_name = op.split(fname)
+        root_name = op.join(op.split(op.split(root_name[0])[0])[1],
+                            op.split(root_name[0])[1], root_name[1])
+        good = True
+        with open(fname, 'r') as fid:
+            for _ in range(10):  # just check the first 10 lines
+                line = fid.readline()
+                if line == '':
+                    break
+                elif line.startswith('# vispy: ') and 'testskip' in line:
+                    good = False
+                    break
+        if not good:
+            n_ran -= 1
+            n_skipped += 1
+            continue
+        sys.stdout.flush()
+        cwd = op.dirname(fname)
+        cmd = [sys.executable, '-c', _script.format(op.split(fname)[1][:-3])]
+        sys.stdout.flush()
+        stdout, stderr, retcode = run_subprocess(cmd, return_code=True,
+                                                 cwd=cwd, env=os.environ)
+        if retcode or len(stderr.strip()) > 0:
+            ext = '\n' + _line_sep + '\n'
+            fails.append('%sExample %s failed (%s):%s%s%s'
+                         % (ext, root_name, retcode, ext, stderr, ext))
+            print(fails[-1])
+        else:
+            print('.', end='')
+        sys.stdout.flush()
+    print('')
+    t = (': %s failed, %s succeeded, %s skipped in %s seconds'
+         % (len(fails), n_ran - len(fails), n_skipped, round(time()-t0)))
+    if len(fails) > 0:
+        raise RuntimeError('Failed%s' % t)
+    print('Success%s' % t)
+
+
+@nottest
+def test(label='full', extra_arg_string=''):
+    """Test vispy software
+
+    Parameters
+    ----------
+    label : str
+        Can be one of 'full', 'nose', 'nobackend', 'extra', 'lineendings',
+        'flake', or any backend name (e.g., 'qt').
+    extra_arg_string : str
+        Extra arguments to sent to ``nose``, e.g. ``'-x --verbosity=2'``.
     """
     from vispy.app.backends import BACKEND_NAMES as backend_names
     label = label.lower()
-    verbosity = int(verbosity)
-    cov = bool(coverage)
-    if cov and op.isfile('.coverage'):
+    if op.isfile('.coverage'):
         os.remove('.coverage')
     known_types = ['full', 'nose', 'lineendings', 'extra', 'flake',
-                   'nobackend'] + backend_names
+                   'nobackend', 'examples'] + backend_names
     if label not in known_types:
         raise ValueError('label must be one of %s, or a backend name %s'
                          % (known_types, backend_names))
@@ -166,12 +318,14 @@ def _tester(label='full', coverage=False, verbosity=1, extra_args=()):
     runs = []
     if label in ('full', 'nose'):
         for backend in backend_names:
-            runs.append([partial(_nose, backend, verbosity, cov, extra_args),
+            runs.append([partial(_nose, backend, extra_arg_string),
                          backend])
     elif label in backend_names:
-        runs.append([partial(_nose, label, verbosity, cov, extra_args), label])
+        runs.append([partial(_nose, label, extra_arg_string), label])
+    if label in ('full', 'examples'):
+        runs.append([_examples, 'examples'])
     if label in ('full', 'nose', 'nobackend'):
-        runs.append([partial(_nose, 'nobackend', verbosity, cov, extra_args),
+        runs.append([partial(_nose, 'nobackend', extra_arg_string),
                      'nobackend'])
     if label in ('full', 'extra', 'lineendings'):
         runs.append([_check_line_endings, 'lineendings'])
@@ -192,10 +346,10 @@ def _tester(label='full', coverage=False, verbosity=1, extra_args=()):
         except Exception as exp:
             # this should only happen if we've screwed up the test setup
             fail += [run[1]]
-            print('Failed strangely: %s\n' % str(exp))
+            print('Failed strangely (%s): %s\n' % (type(exp), str(exp)))
             import traceback
-            type, value, tb = sys.exc_info()
-            traceback.print_exception(type, value, tb)
+            type_, value, tb = sys.exc_info()
+            traceback.print_exception(type_, value, tb)
         else:
             print('Passed\n')
         finally:

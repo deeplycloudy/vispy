@@ -796,7 +796,7 @@ def glGetParameter(pname):
     except AttributeError:
         nativefunc = glGetParameter._native = _get_gl_func("glGetString", ctypes.c_char_p, (ctypes.c_uint,))
     res = nativefunc(name)
-    return res.decode('utf-8') if res else ''
+    return ctypes.string_at(res).decode('utf-8') if res else ''
 
 
 # void = glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params)
@@ -979,8 +979,9 @@ def glPolygonOffset(factor, units):
 def glReadPixels(x, y, width, height, format, type):
     # GL_ALPHA, GL_RGB, GL_RGBA
     t = {6406:1, 6407:3, 6408:4}[format]
-    # we kind of only support type GL_UNSIGNED_BYTE
-    size = int(width*height*t)
+    # GL_UNSIGNED_BYTE, GL_FLOAT
+    nb = {5121:1, 5126:4}[type]
+    size = int(width*height*t*nb)
     pixels = ctypes.create_string_buffer(size)
     try:
         nativefunc = glReadPixels._native

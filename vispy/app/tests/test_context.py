@@ -2,7 +2,7 @@ import os
 import sys
 from nose.tools import assert_equal, assert_raises
 
-from vispy.testing import requires_application, SkipTest
+from vispy.testing import requires_application, SkipTest, run_tests_if_main
 from vispy.app import Canvas, use_app
 from vispy.gloo import (get_gl_configuration, VertexShader, FragmentShader,
                         Program, check_error)
@@ -61,12 +61,16 @@ def test_context_sharing():
             program.activate()
             check_error()
 
-        with Canvas() as c:
+        with Canvas() as c2:
             # pyglet always shares
-            if 'pyglet' not in c.app.backend_name.lower():
+            if 'pyglet' not in c2.app.backend_name.lower():
                 assert_raises(RuntimeError, check)
         if c1.app.backend_name.lower() in ('glut',):
             assert_raises(RuntimeError, Canvas, context=c1.context)
         else:
-            with Canvas(context=c1.context):
+            with Canvas(context=c1.context) as c2:
+                assert c1.context is c2.context  # Same context object
                 check()
+
+
+run_tests_if_main()

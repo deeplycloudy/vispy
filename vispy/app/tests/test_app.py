@@ -1,6 +1,5 @@
 import numpy as np
 import sys
-import os
 from collections import namedtuple
 from time import sleep
 
@@ -9,13 +8,15 @@ from nose.tools import assert_equal, assert_true, assert_raises
 
 from vispy.app import use_app, Canvas, Timer, MouseEvent, KeyEvent
 from vispy.app.base import BaseApplicationBackend
-from vispy.testing import requires_application, SkipTest, assert_is, assert_in
+from vispy.testing import (requires_application, SkipTest, assert_is,
+                           assert_in, run_tests_if_main)
 from vispy.util import keys, use_log_level
 
 from vispy.gloo.program import (Program, VertexBuffer, IndexBuffer)
 from vispy.gloo.shader import VertexShader, FragmentShader
 from vispy.gloo.util import _screenshot
 from vispy.gloo import gl
+from vispy.ext.six.moves import StringIO
 
 gl.use_gl('desktop debug')
 
@@ -121,7 +122,7 @@ def test_run():
     if a.backend_name.lower() == 'glut':
         raise SkipTest('cannot test running glut')  # knownfail
     for _ in range(2):
-        with Canvas(size=(100, 100), show=True, title=' run') as c:
+        with Canvas(size=(100, 100), show=True, title='run') as c:
             @c.events.draw.connect
             def draw(event):
                 print(event)  # test event __repr__
@@ -140,7 +141,7 @@ def test_capability():
     good_kwargs = dict()
     bad_kwargs = dict()
     with Canvas() as c:
-        for key, val in c._backend._vispy_capability.items():
+        for key, val in c.app.backend_module.capability.items():
             if key in non_default_vals:
                 if val:
                     good_kwargs[key] = non_default_vals[key]
@@ -213,12 +214,12 @@ def test_application():
         with use_log_level('info', record=True, print_msg=False) as log:
             olderr = sys.stderr
             try:
-                with open(os.devnull, 'w') as fid:
-                    sys.stderr = fid
+                fid = StringIO()
+                sys.stderr = fid
 
-                    @canvas.events.paint.connect
-                    def fake(event):
-                        pass
+                @canvas.events.paint.connect
+                def fake(event):
+                    pass
             finally:
                 sys.stderr = olderr
         assert_equal(len(log), 1)
@@ -415,3 +416,6 @@ def test_mouse_key_events():
     ke.key
     ke.text
     ke.modifiers
+
+
+run_tests_if_main()

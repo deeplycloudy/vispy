@@ -4,13 +4,13 @@
 # Distributed under the terms of the new BSD License.
 # -----------------------------------------------------------------------------
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_equal, assert_allclose
 from nose.tools import assert_true, assert_equal, assert_raises
 
 from vispy import gloo
 from vispy.gloo import gl
 from vispy.app import Canvas
-from vispy.testing import requires_application
+from vispy.testing import requires_application, run_tests_if_main
 from vispy.gloo import read_pixels
 
 
@@ -19,6 +19,7 @@ def test_wrappers():
     """Test gloo wrappers"""
     with Canvas():
         gl.use_gl('desktop debug')
+        gloo.clear('#112233')  # make it so that there's something non-zero
         # check presets
         assert_raises(ValueError, gloo.set_state, preset='foo')
         for state in gloo.get_state_presets().keys():
@@ -32,9 +33,15 @@ def test_wrappers():
         assert_raises(RuntimeError, gloo.set_line_width, -1)
 
         # check read_pixels
-        assert_true(isinstance(gloo.read_pixels(), np.ndarray))
+        x = gloo.read_pixels()
+        assert_true(isinstance(x, np.ndarray))
         assert_true(isinstance(gloo.read_pixels((0, 0, 1, 1)), np.ndarray))
         assert_raises(ValueError, gloo.read_pixels, (0, 0, 1))  # bad port
+        y = gloo.read_pixels(alpha=False, out_type=np.ubyte)
+        assert_equal(y.shape, x.shape[:2] + (3,))
+        assert_array_equal(x[..., :3], y)
+        y = gloo.read_pixels(out_type='float')
+        assert_allclose(x/255., y)
 
         # now let's (indirectly) check our set_* functions
         viewport = (0, 0, 1, 1)
@@ -89,18 +96,22 @@ def test_read_pixels():
     """
 
     with Canvas() as c:
+        gloo.set_viewport(0, 0, *c.size)
         c._program = gloo.Program(VERT_SHADER, FRAG_SHADER)
         c._program['a_position'] = gloo.VertexBuffer(vPosition)
-        gloo.set_clear_color((0, 0, 0, 0))  # Black background
-        gloo.clear()
+        gloo.clear(color='black')
         c._program.draw('triangle_strip')
 
         # Check if the return of read_pixels is the same as our drawing
-        img = read_pixels()
-        top_left = sum(img[0][0])
+        img = read_pixels(alpha=False)
+        assert_equal(img.shape[:2], c.size[::-1])
+        top_left = sum(img[0, 0])
         assert_true(top_left > 0)  # Should be > 0 (255*4)
         # Sum of the pixels in top right + bottom left + bottom right corners
-        corners = sum(img[0][-1] + img[-1][0] + img[-1][-1])
+        corners = sum(img[0, -1] + img[-1, 0] + img[-1, -1])
         assert_true(corners == 0)  # Should be all 0
         gloo.flush()
         gloo.finish()
+
+
+run_tests_if_main()

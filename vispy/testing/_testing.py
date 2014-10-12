@@ -9,7 +9,6 @@ from __future__ import print_function
 import numpy as np
 import sys
 import os
-import subprocess
 import inspect
 import base64
 try:
@@ -23,14 +22,10 @@ except ImportError:
 
 from distutils.version import LooseVersion
 
-from ..scene import SceneCanvas
 from ..ext.six.moves import http_client as httplib
 from ..ext.six.moves import urllib_parse as urllib
 from ..ext.six import string_types
-from ..io import read_png, _make_png, _check_img_lib
-from ..util import use_log_level
-from ..util.fetching import get_testing_file
-from .. import gloo
+from ..util import use_log_level, run_subprocess, get_testing_file
 
 ###############################################################################
 # Adapted from Python's unittest2 (which is wrapped by nose)
@@ -44,45 +39,6 @@ except ImportError:
     except ImportError:
         class SkipTest(Exception):
             pass
-
-
-def run_subprocess(command):
-    """Run command using subprocess.Popen
-
-    Run command and wait for command to complete. If the return code was zero
-    then return, otherwise raise CalledProcessError.
-    By default, this will also add stdout= and stderr=subproces.PIPE
-    to the call to Popen to suppress printing to the terminal.
-
-    Parameters
-    ----------
-    command : list of str
-        Command to run as subprocess (see subprocess.Popen documentation).
-
-    Returns
-    -------
-    stdout : str
-        Stdout returned by the process.
-    stderr : str
-        Stderr returned by the process.
-    """
-    # code adapted with permission from mne-python
-    kwargs = dict(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-
-    p = subprocess.Popen(command, **kwargs)
-    stdout_, stderr = p.communicate()
-
-    output = (stdout_.decode('ascii'), stderr.decode('ascii'))
-    if p.returncode:
-        print(stdout_)
-        print(stderr)
-        err_fun = subprocess.CalledProcessError.__init__
-        if 'output' in inspect.getargspec(err_fun).args:
-            raise subprocess.CalledProcessError(p.returncode, command, output)
-        else:
-            raise subprocess.CalledProcessError(p.returncode, command)
-
-    return output
 
 
 def _safe_rep(obj, short=False):
@@ -162,13 +118,14 @@ def requires_pyopengl():
 
 def has_backend(backend, has=(), capable=(), out=()):
     from ..app.backends import BACKENDMAP
-    using = os.getenv('_VISPY_TESTING_BACKEND', None)
+    using = os.getenv('_VISPY_TESTING_APP', None)
     if using is not None and using != backend:
         # e.g., we are on  a 'pyglet' run but the test requires PyQt4
         ret = (False,) if len(out) > 0 else False
         for o in out:
             ret += (None,)
         return ret
+
     # let's follow the standard code path
     module_name = BACKENDMAP[backend.lower()][1]
     with use_log_level('warning', print_msg=False):
@@ -185,23 +142,33 @@ def has_backend(backend, has=(), capable=(), out=()):
     return ret
 
 
-def requires_application(backend=None, has=(), capable=()):
-    """Decorator for tests that require an application"""
+def has_application(backend=None, has=(), capable=()):
+    """Determine if a suitable app backend exists"""
     from ..app.backends import BACKEND_NAMES
     # avoid importing other backends if we don't need to
     if backend is None:
-        good = False
         for backend in BACKEND_NAMES:
             if has_backend(backend, has=has, capable=capable):
                 good = True
+                msg = backend
                 break
-        msg = 'Requires application backend'
+        else:
+            good = False
+            msg = 'Requires application backend'
     else:
         good, why = has_backend(backend, has=has, capable=capable,
                                 out=['why_not'])
-        msg = 'Requires %s: %s' % (backend, why)
+        if not good:
+            msg = 'Requires %s: %s' % (backend, why)
+        else:
+            msg = backend
+    return good, msg
 
-    # Actually construct the decorator
+
+def requires_application(backend=None, has=(), capable=()):
+    """Return a decorator for tests that require an application"""
+    good, msg = has_application(backend, has, capable)
+
     def skip_decorator(f):
         import nose
         f.vispy_app_test = True  # set attribute for easy run or not
@@ -227,6 +194,7 @@ def glut_skip():
 
 def requires_img_lib():
     """Decorator for tests that require an image library"""
+    from ..io import _check_img_lib
     if sys.platform.startswith('win'):
         has_img_lib = False  # PIL breaks tests on windows (!)
     else:
@@ -271,6 +239,7 @@ def requires_scipy(min_version='0.13'):
 
 
 def _save_failed_test(data, expect, filename):
+    from ..io import _make_png
     commit, error = run_subprocess(['git', 'rev-parse',  'HEAD'])
     name = filename.split('/')
     name.insert(-1, commit.strip())
@@ -323,6 +292,7 @@ def assert_image_equal(image, reference, limit=40):
     raise SkipTest("Image comparison disabled until polygon visual "
                    "output is finalized.")
     from ..gloo.util import _screenshot
+    from ..io import read_png
 
     if image == "screenshot":
         image = _screenshot(alpha=False)
@@ -349,19 +319,27 @@ def assert_image_equal(image, reference, limit=40):
         raise
 
 
-class TestingCanvas(SceneCanvas):
-    def __init__(self, bgcolor='black', size=(100, 100)):
-        SceneCanvas.__init__(self, size=size, bgcolor=bgcolor)
+@nottest
+def TestingCanvas(bgcolor='black', size=(100, 100)):
+    """Class wrapper to avoid importing scene until necessary"""
+    from ..scene import SceneCanvas
+    from .. import gloo
 
-    def __enter__(self):
-        SceneCanvas.__enter__(self)
-        gloo.clear(color=self._bgcolor)
-        return self
+    class TestingCanvas(SceneCanvas):
+        def __init__(self, bgcolor, size):
+            SceneCanvas.__init__(self, size=size, bgcolor=bgcolor)
 
-    def draw_visual(self, visual):
-        SceneCanvas.draw_visual(self, visual)
-        gloo.gl.glFlush()
-        gloo.gl.glFinish()
+        def __enter__(self):
+            SceneCanvas.__enter__(self)
+            gloo.clear(color=self._bgcolor)
+            return self
+
+        def draw_visual(self, visual):
+            SceneCanvas.draw_visual(self, visual)
+            gloo.gl.glFlush()
+            gloo.gl.glFinish()
+
+    return TestingCanvas(bgcolor, size)
 
 
 @nottest
@@ -374,3 +352,62 @@ def save_testing_image(image, location):
     f = open(location+'.png', 'wb')
     f.write(png)
     f.close()
+
+
+@nottest
+def run_tests_if_main(nose=False):
+    """Run tests in a given file if it is run as a script"""
+    local_vars = inspect.currentframe().f_back.f_locals
+    if not local_vars.get('__name__', '') == '__main__':
+        return
+    # we are in a "__main__"
+    fname = local_vars['__file__']
+    if nose:
+        # Run using nose. More similar to normal test
+        if not os.path.isfile(fname):
+            raise IOError('Could not find file "%s"' % fname)
+        from ._runners import _nose
+        _nose('singlefile', fname + ' --verbosity=2')
+    else:
+        # Run ourselves. post-mortem debugging!
+        try:
+            import faulthandler
+            faulthandler.enable()
+        except Exception:
+            pass
+        import __main__
+        print('==== Running tests in script\n==== %s' % fname)
+        run_tests_in_object(__main__)
+        print('==== Tests pass')
+
+
+def run_tests_in_object(ob):
+    # Setup
+    for name in dir(ob):
+        if name.lower().startswith('setup'):
+            print('Calling %s' % name)
+            getattr(ob, name)()
+    # Exec
+    for name in sorted(dir(ob), key=lambda x: x.lower()):  # consistent order
+        val = getattr(ob, name)
+        if name.startswith('_'):
+            continue
+        elif callable(val) and (name[:4] == 'test' or name[-4:] == 'test'):
+            print('Running test-func %s ... ' % name, end='')
+            try:
+                val()
+                print('ok')
+            except Exception as err:
+                if 'skiptest' in err.__class__.__name__.lower():
+                    print('skip')
+                else:
+                    raise
+        elif isinstance(val, type) and 'Test' in name:
+            print('== Running test-class %s' % name)
+            run_tests_in_object(val())
+            print('== Done with test-class %s' % name)
+    # Teardown
+    for name in dir(ob):
+        if name.lower().startswith('teardown'):
+            print('Calling %s' % name)
+            getattr(ob, name)()

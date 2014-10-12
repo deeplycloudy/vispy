@@ -586,7 +586,7 @@ def glGetParameter(pname):
         return _glGetIntegerv(pname)
     name = pname
     res = _lib.glGetString(name)
-    return res.decode('utf-8') if res else ''
+    return ctypes.string_at(res).decode('utf-8') if res else ''
 
 
 _lib.glGetTexParameterfv.argtypes = ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_float),
@@ -727,8 +727,9 @@ _lib.glReadPixels.argtypes = ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_
 def glReadPixels(x, y, width, height, format, type):
     # GL_ALPHA, GL_RGB, GL_RGBA
     t = {6406:1, 6407:3, 6408:4}[format]
-    # we kind of only support type GL_UNSIGNED_BYTE
-    size = int(width*height*t)
+    # GL_UNSIGNED_BYTE, GL_FLOAT
+    nb = {5121:1, 5126:4}[type]
+    size = int(width*height*t*nb)
     pixels = ctypes.create_string_buffer(size)
     res = _lib.glReadPixels(x, y, width, height, format, type, pixels)
     return pixels[:]

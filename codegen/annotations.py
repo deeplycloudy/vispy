@@ -137,8 +137,9 @@ def readPixels(x, y, width, height, format, type):
     # --- desktop angle mock
     # GL_ALPHA, GL_RGB, GL_RGBA
     t = {6406:1, 6407:3, 6408:4}[format]
-    # we kind of only support type GL_UNSIGNED_BYTE
-    size = int(width*height*t)
+    # GL_UNSIGNED_BYTE, GL_FLOAT
+    nb = {5121:1, 5126:4}[type]
+    size = int(width*height*t*nb)
     # --- desktop angle
     pixels = ctypes.create_string_buffer(size)
     ()
@@ -347,7 +348,7 @@ def getParameter(pname):
     name = pname
     # --- desktop angle
     ()
-    return res.decode('utf-8') if res else ''
+    return ctypes.string_at(res).decode('utf-8') if res else ''
     # --- pyopengl
     res = GL.glGetString(pname)
     return res.decode('utf-8')

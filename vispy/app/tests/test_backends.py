@@ -8,12 +8,13 @@ implementation is corect.
 
 """
 
-from nose.tools import assert_raises
 from inspect import getargspec
+
+from nose.tools import assert_raises
 
 import vispy
 from vispy import keys
-from vispy.testing import requires_application, assert_in
+from vispy.testing import requires_application, assert_in, run_tests_if_main
 from vispy.app import use_app, Application
 from vispy.app.backends import _template
 
@@ -42,12 +43,11 @@ def _test_module_properties(_module=None):
 
     # For Qt backend, we have a common implementation
     alt_modname = ''
-    if module_fname in ('_pyside', '_pyqt4'):
+    if module_fname in ('_pyside', '_pyqt4', '_pyqt5'):
         alt_modname = _module.__name__.rsplit('.', 1)[0] + '._qt'
 
     # Test that all _vispy_x methods are there.
     exceptions = (
-        '_vispy_init',
         '_vispy_get_native_canvas',
         '_vispy_get_native_timer',
         '_vispy_get_native_app',
@@ -56,18 +56,19 @@ def _test_module_properties(_module=None):
         '_vispy_mouse_release',
         '_vispy_get_geometry',
         '_process_backend_kwargs')  # defined in base class
-
+    
+    class KlassRef(vispy.app.base.BaseCanvasBackend):
+        def __init__(self, *args, **kwargs):
+            pass  # Do not call the base class, since it will check for Canvas
     Klass = _module.CanvasBackend
-    KlassRef = vispy.app.base.BaseCanvasBackend
-    base = KlassRef(None, None)
+    base = KlassRef()
     for key in dir(KlassRef):
         if not key.startswith('__'):
             method = getattr(Klass, key)
             if key not in exceptions:
                 print(key)
                 args = [None] * (len(getargspec(method).args) - 1)
-                assert_raises(NotImplementedError, getattr(base, key),
-                              *args)
+                assert_raises(NotImplementedError, getattr(base, key), *args)
                 if hasattr(method, '__module__'):
                     mod_str = method.__module__  # Py3k
                 else:
@@ -106,7 +107,7 @@ def _test_module_properties(_module=None):
 
     # Test that all events seem to be emitted.
     # Get text
-    fname = _module.__file__.strip('c')
+    fname = _module.__file__.rstrip('c')  # "strip" will break windows!
     with open(fname, 'rb') as fid:
         text = fid.read().decode('utf-8')
 
@@ -134,8 +135,11 @@ def test_template():
     for method in (a._vispy_process_events, a._vispy_run, a._vispy_quit,
                    a._vispy_get_native_app):
         assert_raises(NotImplementedError, method)
-
-    c = _template.CanvasBackend(None)
+    
+    class TemplateCanvasBackend(_template.CanvasBackend):
+        def __init__(self, *args, **kwargs):
+            pass  # Do not call the base class, since it will check for Canvas
+    c = TemplateCanvasBackend()  # _template.CanvasBackend(None)
     print(c._vispy_get_native_canvas())
     for method in (c._vispy_set_current, c._vispy_swap_buffers, c._vispy_close,
                    c._vispy_update, c._vispy_get_size, c._vispy_get_position):
@@ -150,3 +154,6 @@ def test_template():
 def test_actual():
     """Test actual application module"""
     _test_module_properties(None)
+
+
+run_tests_if_main()

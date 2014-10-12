@@ -8,7 +8,7 @@ import numpy as np
 
 from vispy.util import use_log_level
 from vispy.gloo import Texture2D, Texture3D, gl
-from vispy.testing import requires_pyopengl
+from vispy.testing import requires_pyopengl, run_tests_if_main
 
 # here we test some things that will be true of all Texture types:
 Texture = Texture2D
@@ -26,10 +26,12 @@ class TextureTest(unittest.TestCase):
     # ---------------------------------
     def test_init_data(self):
         data = np.zeros((10, 10, 3), dtype=np.uint8)
-        T = Texture(data=data)
+        T = Texture(data=data, interpolation='linear', wrapping='repeat')
         assert T._shape == (10, 10, 3)
         assert T._dtype == np.uint8
         assert T._offset == (0, 0, 0)
+        assert T._interpolation == (gl.GL_LINEAR, gl.GL_LINEAR)
+        assert T._wrapping == (gl.GL_REPEAT, gl.GL_REPEAT)
         assert T._store is True
         assert T._copy is False
         assert T._need_resize is True
@@ -598,6 +600,4 @@ class Texture3DTest(unittest.TestCase):
         self.assertRaises(ValueError, T.set_data, newdata)
 
 
-# -----------------------------------------------------------------------------
-if __name__ == "__main__":
-    unittest.main()
+run_tests_if_main()

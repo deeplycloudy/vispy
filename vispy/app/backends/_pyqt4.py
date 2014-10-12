@@ -9,9 +9,17 @@ import sys
 from .. import backends
 from ...util import logger
 
+
 try:
-    # Try importing
-    from PyQt4 import QtGui, QtCore, QtOpenGL  # noqa
+    # Make sure no conflicting libraries have been imported.
+    for lib in ['PySide', 'PyQt5']:
+        lib += '.QtCore'
+        if lib in sys.modules:
+            raise RuntimeError("Refusing to import PyQt4 because %s is "
+                               "already imported." % lib)
+    # Try importing (QtOpenGL first to fail without import QtCore)
+    from PyQt4 import QtOpenGL  # noqa
+    from PyQt4 import QtGui, QtCore  # noqa
 except Exception as exp:
     # Fail: this backend cannot be used
     available, testable, why_not, which = False, False, str(exp), None

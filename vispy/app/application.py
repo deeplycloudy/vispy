@@ -101,10 +101,11 @@ class Application(object):
     def _use(self, backend_name=None):
         """Select a backend by name. See class docstring for details.
         """
-        # See if we're in a specific testing mode
-        test_name = os.getenv('_VISPY_TESTING_TYPE', None)
-        if test_name not in BACKENDMAP:
-            test_name = None
+        # See if we're in a specific testing mode, if so DONT check to see
+        # if it's a valid backend. If it isn't, it's a good thing we
+        # get an error later because we should have decorated our test
+        # with requires_application()
+        test_name = os.getenv('_VISPY_TESTING_APP', None)
 
         # Check whether the given name is valid
         if backend_name is not None:
@@ -175,7 +176,9 @@ class Application(object):
                 logger.debug('Selected backend %s' % module_name)
                 break
         else:
-            raise RuntimeError('Could not import any of the backends.')
+            raise RuntimeError('Could not import any of the backends. '
+                               'You need to install any of %s. We recommend '
+                               'PyQt' % [b[0] for b in CORE_BACKENDS])
 
         # Store classes for app backend and canvas backend
         self._backend = self.backend_module.ApplicationBackend()

@@ -4,6 +4,7 @@
 import numpy as np
 from numpy.testing import assert_array_equal, assert_allclose
 
+from vispy.testing import run_tests_if_main
 from vispy.geometry import create_cube, create_cylinder, create_sphere
 
 
@@ -17,12 +18,15 @@ def test_cube():
 def test_sphere():
     """Test sphere function"""
     md = create_sphere(10, 20, radius=10)
-    radii = np.sqrt((md.vertices() ** 2).sum(axis=1))
+    radii = np.sqrt((md.get_vertices() ** 2).sum(axis=1))
     assert_allclose(radii, np.ones_like(radii) * 10)
 
 
 def test_cylinder():
     """Test cylinder function"""
     md = create_cylinder(10, 20, radius=[10, 10])
-    radii = np.sqrt((md.vertices()[:, :2] ** 2).sum(axis=1))
+    radii = np.sqrt((md.get_vertices()[:, :2] ** 2).sum(axis=1))
     assert_allclose(radii, np.ones_like(radii) * 10)
+
+
+run_tests_if_main()
