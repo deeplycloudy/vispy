@@ -37,8 +37,8 @@ def radar_example_data():
         Returns x,y,z locations of the M x N vertices and 
         (M-1) x (N-1) data value arrays.
         """
-    radar_x0 = 3.75
-    radar_y0 = 10.0
+    radar_x0 = 0.0
+    radar_y0 = 0.0
     radar_z0 = 0.0
     
     el = np.radians(30.0)
@@ -138,6 +138,8 @@ class Canvas(vispy.scene.SceneCanvas):
         face_colors[:,3] = 1.0 # transparency
         mdata = MeshData(vertices=verts, faces=faces, face_colors=face_colors)
         mesh = Mesh(meshdata=mdata)
+        mesh.transform = vispy.scene.transforms.AffineTransform()
+        mesh.transform.scale([1./10, 1./10, 1./10])
         
         vispy.scene.SceneCanvas.__init__(self, keys='interactive')
 
