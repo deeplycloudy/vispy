@@ -43,7 +43,7 @@ def radar_example_data():
     
     el = np.radians(30.0)
 
-    all_r  = np.arange(5, 35, 0.075)
+    all_r  = np.arange(5, 35, 0.75)
     all_az_deg = np.arange(0,361, 2)    
     all_az = np.radians(all_az_deg)
     
