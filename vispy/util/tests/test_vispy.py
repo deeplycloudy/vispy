@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 """ Tests to ensure that base vispy namespace functions correctly,
 including configuration options.
 """
 
-from nose.tools import assert_raises, assert_equal, assert_not_equal
-
 import vispy.app
-from vispy.testing import requires_application, run_tests_if_main
+from vispy.testing import (requires_application, run_tests_if_main,
+                           assert_raises, assert_equal, assert_not_equal)
 
 
 @requires_application('pyside')
@@ -27,7 +26,7 @@ def test_use():
         assert_equal(vispy.app._default_app.default_app, None)
         
         # With only gl args, should do nothing to app
-        vispy.use(gl='desktop')
+        vispy.use(gl='gl2')
         assert_equal(vispy.app._default_app.default_app, None)
         
         # Specify app (one we know works)
@@ -35,11 +34,11 @@ def test_use():
         assert_not_equal(vispy.app._default_app.default_app, None)
         
         # Again, but now wrong app
-        wrong_name = 'glut' if app_name.lower() != 'glut' else 'pyglet'
+        wrong_name = 'glfw' if app_name.lower() != 'glfw' else 'pyqt4'
         assert_raises(RuntimeError, vispy.use, wrong_name)
         
         # And both
-        vispy.use(app_name, 'desktop')
+        vispy.use(app_name, 'gl2')
     
     finally:
         # Restore

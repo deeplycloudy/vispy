@@ -62,8 +62,7 @@ faces_buffer = gloo.IndexBuffer(faces.astype(np.uint16))
 class Canvas(app.Canvas):
 
     def __init__(self, **kwargs):
-        app.Canvas.__init__(self, **kwargs)
-        self.geometry = 0, 0, 400, 400
+        app.Canvas.__init__(self, size=(400, 400), **kwargs)
 
         self.program = gloo.Program(VERT_CODE, FRAG_CODE)
 
@@ -75,44 +74,47 @@ class Canvas(app.Canvas):
 
         # Handle transformations
         self.init_transforms()
-        
-        self._timer = app.Timer('auto', connect=self.update_transforms)
-        self._timer.start()
-    
-    def on_initialize(self, event):
+
+        self.apply_zoom()
+
         gloo.set_clear_color((1, 1, 1, 1))
         gloo.set_state(depth_test=True)
 
+        self._timer = app.Timer('auto', connect=self.update_transforms)
+        self._timer.start()
+
+        self.show()
+
     def on_resize(self, event):
-        width, height = event.size
-        gloo.set_viewport(0, 0, width, height)
-        self.projection = perspective(45.0, width / float(height), 2.0, 10.0)
-        self.program['u_projection'] = self.projection
+        self.apply_zoom()
 
     def on_draw(self, event):
         gloo.clear()
         self.program.draw('triangles', faces_buffer)
 
     def init_transforms(self):
-        self.view = np.eye(4, dtype=np.float32)
+        self.theta = 0
+        self.phi = 0
+        self.view = translate((0, 0, -5))
         self.model = np.eye(4, dtype=np.float32)
         self.projection = np.eye(4, dtype=np.float32)
 
-        self.theta = 0
-        self.phi = 0
-
-        translate(self.view, 0, 0, -5)
         self.program['u_model'] = self.model
         self.program['u_view'] = self.view
 
     def update_transforms(self, event):
         self.theta += .5
         self.phi += .5
-        self.model = np.eye(4, dtype=np.float32)
-        rotate(self.model, self.theta, 0, 0, 1)
-        rotate(self.model, self.phi, 0, 1, 0)
+        self.model = np.dot(rotate(self.theta, (0, 0, 1)),
+                            rotate(self.phi, (0, 1, 0)))
         self.program['u_model'] = self.model
         self.update()
+
+    def apply_zoom(self):
+        gloo.set_viewport(0, 0, self.physical_size[0], self.physical_size[1])
+        self.projection = perspective(45.0, self.size[0] /
+                                      float(self.size[1]), 2.0, 10.0)
+        self.program['u_projection'] = self.projection
 
 
 class TextField(QtGui.QPlainTextEdit):
@@ -147,7 +149,7 @@ class MainWindow(QtGui.QWidget):
 
         # Create a canvas
         self.canvas = Canvas(parent=self)
-        
+
         # Layout
         hlayout = QtGui.QHBoxLayout(self)
         self.setLayout(hlayout)
@@ -162,20 +164,17 @@ class MainWindow(QtGui.QWidget):
         vlayout.addWidget(self.fragEdit, 1)
         vlayout.addWidget(self.theButton, 0)
 
+        self.show()
+
     def on_compile(self):
         vert_code = str(self.vertEdit.toPlainText())
         frag_code = str(self.fragEdit.toPlainText())
-        self.canvas.program.shaders[0].code = vert_code
-        self.canvas.program.shaders[1].code = frag_code
-        # Because the code has changed, the variables are re-created,
-        # so we need to reset them. This can be considered a bug in gloo
-        # and should be addressed at some point.
-        self.canvas.program['u_projection'] = self.canvas.projection
-        self.canvas.program['u_view'] = self.canvas.view
-        
+        self.canvas.program.set_shaders(vert_code, frag_code)
+        # Note how we do not need to reset our variables, they are
+        # re-set automatically (by gloo)
+
 
 if __name__ == '__main__':
     app.create()
     m = MainWindow()
-    m.show()
     app.run()

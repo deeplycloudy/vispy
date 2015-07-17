@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 
@@ -17,6 +17,8 @@ from vispy.scene.visuals import Text
 # Create canvas with a viewbox at the lower half
 canvas = scene.SceneCanvas(keys='interactive')
 vb = scene.widgets.ViewBox(parent=canvas.scene, border_color='b')
+vb.camera = scene.TurntableCamera(elevation=30, azimuth=30, up='+z')
+axis = scene.visuals.XYZAxis(parent=vb.scene)
 vb.camera.rect = 0, 0, 1, 1
 
 
@@ -39,7 +41,7 @@ N = 1000
 linedata = np.empty((N, 2), np.float32)
 linedata[:, 0] = np.linspace(0, 1, N)
 linedata[:, 1] = np.random.uniform(0.5, 0.1, (N,))
-scene.visuals.Line(pos=linedata, color='#f006', mode='gl', parent=vb.scene)
+scene.visuals.Line(pos=linedata, color='#f006', method='gl', parent=vb.scene)
 
 if __name__ == '__main__':
     canvas.show()

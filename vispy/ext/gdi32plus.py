@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 
@@ -162,7 +162,10 @@ user32.GetDC.argtypes = [UINT32]  # HWND
 
 user32.ReleaseDC.argtypes = [c_void_p, HDC]
 
-user32.SetProcessDPIAware.argtypes = []
+try:
+    user32.SetProcessDPIAware.argtypes = []
+except AttributeError:
+    pass  # not present on XP
 
 
 # gdiplus

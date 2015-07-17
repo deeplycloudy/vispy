@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: testskip
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author:   Per Rosengren
@@ -42,6 +42,10 @@ class Canvas(app.Canvas):
         self._dir_x_right = dir_x_right
         self._dir_y_top = dir_y_top
 
+        self.activate_zoom()
+
+        self.show()
+
     def create_shader(self, colormap):
         if len(colormap.shape) == 2:
             args = dict(
@@ -54,8 +58,6 @@ class Canvas(app.Canvas):
                 tex_t="vec2",
                 texture2D_arg="v_texcoord")
         vertex = """
-            uniform mat4 model;
-            uniform mat4 view;
             uniform mat4 projection;
             uniform sampler2D texture;
 
@@ -86,11 +88,7 @@ class Canvas(app.Canvas):
         else:
             self.program['texture'] = colormap
         self.program['texture'].interpolation = 'linear'
-        self.view = np.eye(4, dtype=np.float32)
-        self.model = np.eye(4, dtype=np.float32)
         self.projection = np.eye(4, dtype=np.float32)
-        self.program['model'] = self.model
-        self.program['view'] = self.view
 
     def create_mesh(self, x, y, u, v):
         tri = scipy.spatial.Delaunay(np.column_stack([x, y]))
@@ -112,7 +110,6 @@ class Canvas(app.Canvas):
         self.vbo = gloo.VertexBuffer(data)
         self.index = gloo.IndexBuffer(edges)
 
-    def on_initialize(self, event):
         gloo.set_state(blend=True, clear_color='white',
                        blend_func=('src_alpha', 'one_minus_src_alpha'))
 
@@ -121,10 +118,11 @@ class Canvas(app.Canvas):
         self.program.draw('triangles', self.index)
 
     def on_resize(self, event):
-        self.resize(*event.size)
+        self.activate_zoom()
 
-    def resize(self, width, height):
-        gloo.set_viewport(0, 0, width, height)
+    def activate_zoom(self):
+        width, heigh = self.size
+        gloo.set_viewport(0, 0, *self.physical_size)
         data_width = self._data_lim[0][1] - self._data_lim[0][0]
         data_height = self._data_lim[1][1] - self._data_lim[1][0]
         data_aspect = data_width / float(data_height)
@@ -214,7 +212,5 @@ if __name__ == '__main__':
                 x=loc[:, 0], y=loc[:, 1], u=vec[:, 0],
                 colormap=create_colormap1d_hot(size=128),
                 keys='interactive')
-    c1.show()
-    c2.show()
     if sys.flags.interactive == 0:
         app.run()

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 
@@ -10,25 +10,14 @@ import numpy as np
 import sys
 import os
 import inspect
-import base64
-try:
-    from nose.tools import nottest, assert_equal, assert_true
-except ImportError:
-    assert_equal = assert_true = None
-
-    class nottest(object):
-        def __init__(self, *args):
-            pass  # Avoid "object() takes no parameters"
 
 from distutils.version import LooseVersion
 
-from ..ext.six.moves import http_client as httplib
-from ..ext.six.moves import urllib_parse as urllib
 from ..ext.six import string_types
-from ..util import use_log_level, run_subprocess, get_testing_file
+from ..util import use_log_level
 
 ###############################################################################
-# Adapted from Python's unittest2 (which is wrapped by nose)
+# Adapted from Python's unittest2
 # http://docs.python.org/2/license.html
 
 try:
@@ -72,29 +61,87 @@ def _format_msg(msg, std_msg):
     return msg
 
 
+def nottest(func):
+    """Decorator to mark a function or method as *not* a test
+    """
+    func.__test__ = False
+    return func
+
+
+def assert_raises(exp, func, *args, **kwargs):
+    """Backport"""
+    try:
+        func(*args, **kwargs)
+    except exp:
+        return
+    std_msg = '%s not raised' % (_safe_rep(exp))
+    raise AssertionError(_format_msg(None, std_msg))
+
+
 def assert_in(member, container, msg=None):
-    """Backport for old nose.tools"""
+    """Backport"""
     if member in container:
         return
     std_msg = '%s not found in %s' % (_safe_rep(member), _safe_rep(container))
-    msg = _format_msg(msg, std_msg)
-    raise AssertionError(msg)
+    raise AssertionError(_format_msg(msg, std_msg))
+
+
+def assert_true(x, msg=None):
+    """Backport"""
+    if x:
+        return
+    std_msg = '%s is not True' % (_safe_rep(x),)
+    raise AssertionError(_format_msg(msg, std_msg))
+
+
+def assert_equal(x, y, msg=None):
+    """Backport"""
+    if x == y:
+        return
+    std_msg = '%s not equal to %s' % (_safe_rep(x), _safe_rep(y))
+    raise AssertionError(_format_msg(msg, std_msg))
+
+
+def assert_not_equal(x, y, msg=None):
+    """Backport"""
+    if x != y:
+        return
+    std_msg = '%s equal to %s' % (_safe_rep(x), _safe_rep(y))
+    raise AssertionError(_format_msg(msg, std_msg))
 
 
 def assert_not_in(member, container, msg=None):
-    """Backport for old nose.tools"""
+    """Backport"""
     if member not in container:
         return
     std_msg = '%s found in %s' % (_safe_rep(member), _safe_rep(container))
-    msg = _format_msg(msg, std_msg)
-    raise AssertionError(msg)
+    raise AssertionError(_format_msg(msg, std_msg))
 
 
 def assert_is(expr1, expr2, msg=None):
-    """Backport for old nose.tools"""
+    """Backport"""
     if expr1 is not expr2:
         std_msg = '%s is not %s' % (_safe_rep(expr1), _safe_rep(expr2))
         raise AssertionError(_format_msg(msg, std_msg))
+
+
+class raises(object):
+    """Helper class to test exception raising"""
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_typ, exc, tb):
+        if isinstance(exc, self.exc):
+            return True
+        elif exc is None:
+            raise AssertionError("Expected %s (no exception raised)" %
+                                 self.exc.__name__)
+        else:
+            raise AssertionError("Expected %s, got %s instead" %
+                                 (self.exc.__name__, type(exc).__name__))
 
 
 ###############################################################################
@@ -165,31 +212,24 @@ def has_application(backend=None, has=(), capable=()):
     return good, msg
 
 
+def composed(*decs):
+    def deco(f):
+        for dec in reversed(decs):
+            f = dec(f)
+        return f
+    return deco
+
+
 def requires_application(backend=None, has=(), capable=()):
     """Return a decorator for tests that require an application"""
     good, msg = has_application(backend, has, capable)
-
-    def skip_decorator(f):
-        import nose
-        f.vispy_app_test = True  # set attribute for easy run or not
-
-        def skipper(*args, **kwargs):
-            if not good:
-                raise SkipTest("Skipping test: %s: %s" % (f.__name__, msg))
-            else:
-                return f(*args, **kwargs)
-        return nose.tools.make_decorator(f)(skipper)
-    return skip_decorator
-
-
-def glut_skip():
-    """Helper to skip a test if GLUT is the current backend"""
-    # this is basically a knownfail tool for glut
-    from ..app import use_app
-    app = use_app()
-    if app.backend_name.lower() == 'glut':
-        raise SkipTest('GLUT unstable')
-    return  # otherwise it's fine
+    dec_backend = np.testing.dec.skipif(not good, "Skipping test: %s" % msg)
+    try:
+        import pytest
+    except Exception:
+        return dec_backend
+    dec_app = pytest.mark.vispy_app_test
+    return composed(dec_app, dec_backend)
 
 
 def requires_img_lib():
@@ -200,6 +240,34 @@ def requires_img_lib():
     else:
         has_img_lib = not all(c is None for c in _check_img_lib())
     return np.testing.dec.skipif(not has_img_lib, 'imageio or PIL required')
+
+
+def has_ipython(version='3.0'):
+    """function that checks the presence of IPython"""
+
+    # typecast version to a string, in case an integer is given
+    version = str(version)
+
+    try:
+        import IPython  # noqa
+    except Exception:
+        return False, "IPython library not found"
+    else:
+        if LooseVersion(IPython.__version__) >= LooseVersion(version):
+            return True, "IPython present"
+        else:
+            message = (
+                "current IPython version: (%s) is "
+                "older than expected version: (%s)") % \
+                (IPython.__version__, version)
+
+            return False, message
+
+
+def requires_ipython(version='3.0'):
+    ipython_present, message = has_ipython(version)
+
+    return np.testing.dec.skipif(not ipython_present, message)
 
 
 def has_matplotlib(version='1.2'):
@@ -238,108 +306,47 @@ def requires_scipy(min_version='0.13'):
                                  'Requires Scipy version >= %s' % min_version)
 
 
-def _save_failed_test(data, expect, filename):
-    from ..io import _make_png
-    commit, error = run_subprocess(['git', 'rev-parse',  'HEAD'])
-    name = filename.split('/')
-    name.insert(-1, commit.strip())
-    filename = '/'.join(name)
-    host = 'data.vispy.org'
-
-    # concatenate data, expect, and diff into a single image
-    ds = data.shape
-    es = expect.shape
-    if ds == es:
-        shape = (ds[0], ds[1] * 3 + 2, 4)
-        img = np.empty(shape, dtype=np.ubyte)
-        img[:] = 255
-        img[:, :ds[1], :ds[2]] = data
-        img[:, ds[1]+1:ds[1]*2+1, :ds[2]] = expect
-        img[:, ds[1]*2 + 2:, :ds[2]] = np.abs(data.astype(int) -
-                                              expect.astype(int))
-    else:
-        shape = (ds[0], ds[1] * 2 + 1, 4)
-        img = np.empty(shape, dtype=np.ubyte)
-        img[:] = 255
-        img[:ds[0], :ds[1], :ds[2]] = data
-        img[:es[0], ds[1]+1+es[1]:, :es[2]] = expect
-
-    png = _make_png(img)
-    conn = httplib.HTTPConnection(host)
-    req = urllib.urlencode({'name': filename,
-                            'data': base64.b64encode(png)})
-    conn.request('POST', '/upload.py', req)
-    response = conn.getresponse().read()
-    conn.close()
-    print("\nUpload to: \nhttp://%s/data/%s" % (host, filename))
-    if not response.startswith(b'OK'):
-        print("WARNING: Error uploading data to %s" % host)
-        print(response)
-
-
-def assert_image_equal(image, reference, limit=40):
-    """Downloads reference image and compares with image
-
-    Parameters
-    ----------
-    image: str, numpy.array
-        'screenshot' or image data
-    reference: str
-        'The filename on the remote ``test-data`` repository to download'
-    limit : int
-        Number of pixels that can differ in the image.
-    """
-    raise SkipTest("Image comparison disabled until polygon visual "
-                   "output is finalized.")
-    from ..gloo.util import _screenshot
-    from ..io import read_png
-
-    if image == "screenshot":
-        image = _screenshot(alpha=False)
-    ref = read_png(get_testing_file(reference))[:, :, :3]
-
-    assert_equal(image.shape, ref.shape)
-
-    # check for minimum number of changed pixels, allowing for overall 1-pixel
-    # shift in any direcion
-    slices = [slice(0, -1), slice(0, None), slice(1, None)]
-    min_diff = np.inf
-    for i in range(3):
-        for j in range(3):
-            a = image[slices[i], slices[j]]
-            b = ref[slices[2-i], slices[2-j]]
-            diff = np.any(a != b, axis=2).sum()
-            if diff < min_diff:
-                min_diff = diff
-    try:
-        assert_true(min_diff <= limit,
-                    'min_diff (%s) > %s' % (min_diff, limit))
-    except AssertionError:
-        _save_failed_test(image, ref, reference)
-        raise
-
-
 @nottest
-def TestingCanvas(bgcolor='black', size=(100, 100)):
+def TestingCanvas(bgcolor='black', size=(100, 100), dpi=None, decorate=False,
+                  **kwargs):
     """Class wrapper to avoid importing scene until necessary"""
+    # On Windows decorations can force windows to be an incorrect size
+    # (e.g., instead of 100x100 they will be 100x248), having no
+    # decorations works around this
     from ..scene import SceneCanvas
-    from .. import gloo
 
     class TestingCanvas(SceneCanvas):
-        def __init__(self, bgcolor, size):
-            SceneCanvas.__init__(self, size=size, bgcolor=bgcolor)
+        def __init__(self, bgcolor, size, dpi, decorate, **kwargs):
+            self._entered = False
+            SceneCanvas.__init__(self, bgcolor=bgcolor, size=size,
+                                 dpi=dpi, decorate=decorate,
+                                 **kwargs)
 
         def __enter__(self):
             SceneCanvas.__enter__(self)
-            gloo.clear(color=self._bgcolor)
+            # sometimes our window can be larger than our requsted draw
+            # area (e.g. on Windows), and this messes up our tests that
+            # typically use very small windows. Here we "fix" it.
+            scale = np.array(self.physical_size) / np.array(self.size, float)
+            scale = int(np.round(np.mean(scale)))
+            self._wanted_vp = 0, 0, size[0] * scale, size[1] * scale
+            self.context.set_state(clear_color=self._bgcolor)
+            self.context.set_viewport(*self._wanted_vp)
+            self._entered = True
             return self
 
-        def draw_visual(self, visual):
-            SceneCanvas.draw_visual(self, visual)
-            gloo.gl.glFlush()
-            gloo.gl.glFinish()
+        def draw_visual(self, visual, event=None, viewport=None, clear=True):
+            if not self._entered:
+                return
+            if clear:
+                self.context.clear()
+            SceneCanvas.draw_visual(self, visual, event, viewport)
+            # must set this because draw_visual sets it back to the
+            # canvas size when it's done
+            self.context.set_viewport(*self._wanted_vp)
+            self.context.finish()
 
-    return TestingCanvas(bgcolor, size)
+    return TestingCanvas(bgcolor, size, dpi, decorate, **kwargs)
 
 
 @nottest
@@ -348,34 +355,29 @@ def save_testing_image(image, location):
     from ..util import make_png
     if image == "screenshot":
         image = _screenshot(alpha=False)
-    png = make_png(image)
-    f = open(location+'.png', 'wb')
-    f.write(png)
-    f.close()
+    with open(location+'.png', 'wb') as fid:
+        fid.write(make_png(image))
 
 
 @nottest
-def run_tests_if_main(nose=False):
+def run_tests_if_main():
     """Run tests in a given file if it is run as a script"""
     local_vars = inspect.currentframe().f_back.f_locals
     if not local_vars.get('__name__', '') == '__main__':
         return
     # we are in a "__main__"
     fname = local_vars['__file__']
-    if nose:
-        # Run using nose. More similar to normal test
-        if not os.path.isfile(fname):
-            raise IOError('Could not find file "%s"' % fname)
-        from ._runners import _nose
-        _nose('singlefile', fname + ' --verbosity=2')
-    else:
-        # Run ourselves. post-mortem debugging!
-        try:
-            import faulthandler
-            faulthandler.enable()
-        except Exception:
-            pass
-        import __main__
+    # Run ourselves. post-mortem debugging!
+    try:
+        import faulthandler
+        faulthandler.enable()
+    except Exception:
+        pass
+    import __main__
+    try:
+        import pytest
+        pytest.main(['-s', '--tb=short', fname])
+    except ImportError:
         print('==== Running tests in script\n==== %s' % fname)
         run_tests_in_object(__main__)
         print('==== Tests pass')

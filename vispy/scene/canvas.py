@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 from __future__ import division
@@ -8,22 +8,18 @@ import weakref
 
 from .. import gloo
 from .. import app
-from .subscene import SubScene
-from .entity import Entity
-from .transforms import STTransform, TransformCache
-from .events import SceneDrawEvent, SceneMouseEvent
+from .node import Node
+from ..visuals.transforms import STTransform, TransformCache
 from ..color import Color
 from ..util import logger
+from ..util.profiler import Profiler
+from .subscene import SubScene
+from .events import SceneDrawEvent, SceneMouseEvent
 from .widgets import Widget
 
 
 class SceneCanvas(app.Canvas):
-    """ SceneCanvas provides a Canvas that automatically draws the contents
-    of a scene.
-
-    Receives the following events:
-    initialize, resize, draw, mouse_press, mouse_release, mouse_move,
-    mouse_wheel, key_press, key_release, stylus, touch, close
+    """A Canvas that automatically draws the contents of a scene
 
     Parameters
     ----------
@@ -46,24 +42,22 @@ class SceneCanvas(app.Canvas):
         Note the canvas application can be accessed at ``canvas.app``.
     create_native : bool
         Whether to create the widget immediately. Default True.
-    init_gloo : bool
-        Initialize standard values in gloo (e.g., ``GL_POINT_SPRITE``).
     vsync : bool
         Enable vertical synchronization.
     resizable : bool
         Allow the window to be resized.
     decorate : bool
-        Decorate the window.
+        Decorate the window. Default True.
     fullscreen : bool | int
         If False, windowed mode is used (default). If True, the default
         monitor is used. If int, the given monitor number is used.
-    context : dict | instance SharedContext | None
-        OpenGL configuration to use when creating the context for the canvas,
-        or a context to share. If None, ``vispy.app.get_default_config`` will
-        be used to set the OpenGL context parameters. Alternatively, the
-        ``canvas.context`` property from an existing canvas (using the
-        same backend) will return a ``SharedContext`` that can be used,
-        thereby sharing the existing context.
+    config : dict
+        A dict with OpenGL configuration options, which is combined
+        with the default configuration options and used to initialize
+        the context. See ``canvas.context.config`` for possible
+        options.
+    shared : Canvas | GLContext | None
+        An existing canvas or context to share OpenGL objects with.
     keys : str | dict | None
         Default key mapping to use. If 'interactive', escape and F11 will
         close the canvas and toggle full-screen mode, respectively.
@@ -72,23 +66,66 @@ class SceneCanvas(app.Canvas):
         be callable.
     parent : widget-object
         The parent widget if this makes sense for the used backend.
+    dpi : float | None
+        Resolution in dots-per-inch to use for the canvas. If dpi is None,
+        then the value will be determined by querying the global config first,
+        and then the operating system.
+    always_on_top : bool
+        If True, try to create the window in always-on-top mode.
+    px_scale : int > 0
+        A scale factor to apply between logical and physical pixels in addition
+        to the actual scale factor determined by the backend. This option
+        allows the scale factor to be adjusted for testing.
     bgcolor : Color
         The background color to use.
 
     See also
     --------
     vispy.app.Canvas
+
+    Notes
+    -----
+    Receives the following events:
+
+        * initialize
+        * resize
+        * draw
+        * mouse_press
+        * mouse_release
+        * mouse_double_click
+        * mouse_move
+        * mouse_wheel
+        * key_press
+        * key_release
+        * stylus
+        * touch
+        * close
+
+    The ordering of the mouse_double_click, mouse_press, and mouse_release
+    events are not guaranteed to be consistent between backends. Only certain
+    backends natively support double-clicking (currently Qt and WX); on other
+    backends, they are detected manually with a fixed time delay.
+    This can cause problems with accessibility, as increasing the OS detection
+    time or using a dedicated double-click button will not be respected.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, title='Vispy canvas', size=(800, 600), position=None,
+                 show=False, autoswap=True, app=None, create_native=True,
+                 vsync=False, resizable=True, decorate=True, fullscreen=False,
+                 config=None, shared=None, keys=None, parent=None, dpi=None,
+                 always_on_top=False, px_scale=1, bgcolor='black'):
         self._fb_stack = []  # for storing information about framebuffers used
         self._vp_stack = []  # for storing information about viewports used
         self._scene = None
-        self._bgcolor = Color(kwargs.pop('bgcolor', 'black')).rgba
         
         # A default widget that follows the shape of the canvas
         self._central_widget = None
 
-        app.Canvas.__init__(self, *args, **kwargs)
+        self._bgcolor = Color(bgcolor).rgba
+
+        super(SceneCanvas, self).__init__(
+            title, size, position, show, autoswap, app, create_native, vsync,
+            resizable, decorate, fullscreen, config, shared, keys, parent, dpi,
+            always_on_top, px_scale)
         self.events.mouse_press.connect(self._process_mouse_event)
         self.events.mouse_move.connect(self._process_mouse_event)
         self.events.mouse_release.connect(self._process_mouse_event)
@@ -98,13 +135,13 @@ class SceneCanvas(app.Canvas):
         # self.draw_visual(...)
         self._transform_caches = weakref.WeakKeyDictionary()
 
-        # Set up default entity stack: ndc -> fb -> canvas -> scene
-        self.render_cs = Entity(name="render_cs")
-        self.framebuffer_cs = Entity(parent=self.render_cs, 
-                                     name="framebuffer_cs")
+        # Set up default node stack: ndc -> fb -> canvas -> scene
+        self.render_cs = Node(name="render_cs")
+        self.framebuffer_cs = Node(parent=self.render_cs, 
+                                   name="framebuffer_cs")
         self.framebuffer_cs.transform = STTransform()
-        self.canvas_cs = Entity(parent=self.framebuffer_cs,
-                                name="canvas_cs")
+        self.canvas_cs = Node(parent=self.framebuffer_cs,
+                              name="canvas_cs")
         self.canvas_cs.transform = STTransform()
         # By default, the document coordinate system is the canvas.
         self.canvas_cs.document = self.canvas_cs
@@ -113,7 +150,7 @@ class SceneCanvas(app.Canvas):
         
     @property
     def scene(self):
-        """ The SubScene object that represents the root entity of the
+        """ The SubScene object that represents the root node of the
         scene graph to be displayed.
         """
         return self._scene
@@ -138,6 +175,13 @@ class SceneCanvas(app.Canvas):
         self.update()
 
     def on_draw(self, event):
+        """Draw handler
+
+        Parameters
+        ----------
+        event : instance of Event
+            The draw event.
+        """
         if self._scene is None:
             return  # Can happen on initialization
         logger.debug('Canvas draw')
@@ -169,25 +213,25 @@ class SceneCanvas(app.Canvas):
         offset = (0, 0) if region is None else region[:2]
         csize = self.size if region is None else region[2:]
         size = csize if size is None else size
-        fbo = gloo.FrameBuffer(color=gloo.ColorBuffer(size[::-1]), 
-                               depth=gloo.DepthBuffer(size[::-1]))
-        
+        fbo = gloo.FrameBuffer(color=gloo.RenderBuffer(size[::-1]),
+                               depth=gloo.RenderBuffer(size[::-1]))
+
         self.push_fbo(fbo, offset, csize)
         try:
-            self._draw_scene()
+            self._draw_scene(viewport=(0, 0) + size)
             return fbo.read()
         finally:
             self.pop_fbo()
-        
-    def _draw_scene(self):
-        gloo.clear(color=self._bgcolor, depth=True)
+
+    def _draw_scene(self, viewport=None):
+        self.context.clear(color=self._bgcolor, depth=True)
         # Draw the scene, but first disconnect its change signal--
         # any changes that take place during the paint should not trigger
         # a subsequent repaint.
         with self.scene.events.update.blocker(self._scene_update):
-            self.draw_visual(self.scene)
+            self.draw_visual(self.scene, viewport=viewport)
 
-    def draw_visual(self, visual, event=None):
+    def draw_visual(self, visual, event=None, viewport=None):
         """ Draw a visual to the canvas or currently active framebuffer.
         
         Parameters
@@ -197,21 +241,31 @@ class SceneCanvas(app.Canvas):
         event : None or DrawEvent
             Optionally specifies the original canvas draw event that initiated
             this draw.
+        viewport : tuple | None
+            Optionally specifies the viewport to use. If None, the entire
+            physical size is used.
         """
+        self.set_current()
+        prof = Profiler()
         nfb = len(self._fb_stack)
         nvp = len(self._vp_stack)
         
         # Create draw event, which keeps track of the path of transforms
-        self._process_entity_count = 0  # for debugging
+        self._process_node_count = 0  # for debugging
         
         # Get the cache of transforms used for this visual
         tr_cache = self._transform_caches.setdefault(visual, TransformCache())
         # and mark the entire cache as aged
         tr_cache.roll()
+        prof('roll transform cache')
         
         scene_event = SceneDrawEvent(canvas=self, event=event, 
                                      transform_cache=tr_cache)
-        scene_event.push_viewport((0, 0) + self.size)
+        prof('create SceneDrawEvent')
+        
+        vp = (0, 0) + self.physical_size if viewport is None else viewport
+        scene_event.push_viewport(vp)
+        prof('push_viewport')
         try:
             # Force update of transforms on base entities
             # TODO: this should happen as a reaction to resize, push_viewport,
@@ -220,11 +274,13 @@ class SceneCanvas(app.Canvas):
             self.fb_ndc_transform
             self.canvas_fb_transform
             
-            scene_event.push_entity(self.render_cs)
-            scene_event.push_entity(self.framebuffer_cs)
-            scene_event.push_entity(self.canvas_cs)
-            scene_event.push_entity(visual)
+            scene_event.push_node(self.render_cs)
+            scene_event.push_node(self.framebuffer_cs)
+            scene_event.push_node(self.canvas_cs)
+            scene_event.push_node(visual)
+            prof('initialize event scenegraph')
             visual.draw(scene_event)
+            prof('draw scene')
         finally:
             scene_event.pop_viewport()
 
@@ -234,30 +290,47 @@ class SceneCanvas(app.Canvas):
             logger.warning("Framebuffer stack not fully cleared after draw.")
 
     def _process_mouse_event(self, event):
+        prof = Profiler()
         tr_cache = self._transform_caches.setdefault(self.scene, 
                                                      TransformCache())
         scene_event = SceneMouseEvent(canvas=self, event=event,
                                       transform_cache=tr_cache)
-        scene_event.push_entity(self.render_cs)
-        scene_event.push_entity(self.framebuffer_cs)
-        scene_event.push_entity(self.canvas_cs)
-        scene_event.push_entity(self._scene)
+        scene_event.push_node(self.render_cs)
+        scene_event.push_node(self.framebuffer_cs)
+        scene_event.push_node(self.canvas_cs)
+        scene_event.push_node(self._scene)
+        prof('prepare mouse event')
+        
         self._scene._process_mouse_event(scene_event)
+        prof('process')
         
         # If something in the scene handled the scene_event, then we mark
         # the original event accordingly.
         event.handled = scene_event.handled
 
     def on_resize(self, event):
+        """Resize handler
+
+        Parameters
+        ----------
+        event : instance of Event
+            The resize event.
+        """
         if self._central_widget is not None:
             self._central_widget.size = self.size
 
     # -------------------------------------------------- transform handling ---
     def push_viewport(self, viewport):
-        """ Push a viewport (x, y, w, h) on the stack. It is the
-        responsibility of the caller to ensure the given values are
+        """ Push a viewport on the stack
+
+        It is the responsibility of the caller to ensure the given values are
         int. The viewport's origin is defined relative to the current
         viewport.
+
+        Parameters
+        ----------
+        viewport : tuple
+            The viewport as (x, y, w, h).
         """
         vp = list(viewport)
         # Normalize viewport before setting;
@@ -267,7 +340,7 @@ class SceneCanvas(app.Canvas):
         if vp[3] < 0:
             vp[1] += vp[3]
             vp[3] *= -1
-            
+
         self._vp_stack.append(vp)
         self.fb_ndc_transform  # update!
         # Apply
@@ -287,18 +360,26 @@ class SceneCanvas(app.Canvas):
             self._set_viewport(self._vp_stack[-1])
             self.fb_ndc_transform  # update!
         return vp
-    
+
     def _set_viewport(self, vp):
-        from .. import gloo
-        gloo.set_viewport(*vp)
+        self.context.set_viewport(*vp)
 
     def push_fbo(self, fbo, offset, csize):
         """ Push an FBO on the stack, together with the new viewport.
         and the transform to the FBO.
+
+        Parameters
+        ----------
+        fbo : instance of FrameBuffer
+            The framebuffer.
+        offset : tuple
+            The offset.
+        csize : tuple
+            The size to use.
         """
         self._fb_stack.append((fbo, offset, csize))
         self.canvas_fb_transform  # update!
-        
+
         # Apply
         try:
             fbo.activate()
@@ -349,8 +430,7 @@ class SceneCanvas(app.Canvas):
         """
         fbo, offset, csize = self._current_framebuffer()
         if fbo is None:
-            # todo: account for high-res displays here.
-            fbsize = csize
+            fbsize = self.physical_size
         else:
             fbsize = fbo.color_buffer.shape
             # image shape is (rows, cols), unlike canvas shape.
@@ -387,3 +467,13 @@ class SceneCanvas(app.Canvas):
         Most visuals should use this transform when drawing.
         """
         return self.fb_ndc_transform * self.canvas_fb_transform
+
+    @property
+    def bgcolor(self):
+        return Color(self._bgcolor)
+
+    @bgcolor.setter
+    def bgcolor(self, color):
+        self._bgcolor = Color(color).rgba
+        if hasattr(self, '_backend'):
+            self.update()

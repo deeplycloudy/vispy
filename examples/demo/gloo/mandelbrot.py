@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 30
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author: John David Reaver
@@ -25,56 +25,47 @@ fragment = """
 uniform vec2 resolution;
 uniform vec2 center;
 uniform float scale;
-uniform int iter;
 
-// Jet color scheme
-vec4 color_scheme(float x) {
-    vec3 a, b;
-    float c;
-    if (x < 0.34) {
-        a = vec3(0, 0, 0.5);
-        b = vec3(0, 0.8, 0.95);
-        c = (x - 0.0) / (0.34 - 0.0);
-    } else if (x < 0.64) {
-        a = vec3(0, 0.8, 0.95);
-        b = vec3(0.85, 1, 0.04);
-        c = (x - 0.34) / (0.64 - 0.34);
-    } else if (x < 0.89) {
-        a = vec3(0.85, 1, 0.04);
-        b = vec3(0.96, 0.7, 0);
-        c = (x - 0.64) / (0.89 - 0.64);
-    } else {
-        a = vec3(0.96, 0.7, 0);
-        b = vec3(0.5, 0, 0);
-        c = (x - 0.89) / (1.0 - 0.89);
-    }
-    return vec4(mix(a, b, c), 1.0);
+vec3 hot(float t)
+{
+    return vec3(smoothstep(0.00,0.33,t),
+                smoothstep(0.33,0.66,t),
+                smoothstep(0.66,1.00,t));
 }
 
-void main() {
-    vec2 z, c;
+void main()
+{
+    
+    const int n = 300;
+    const float log_2 = 0.6931471805599453;
+
+    vec2 c;
 
     // Recover coordinates from pixel coordinates
     c.x = (gl_FragCoord.x / resolution.x - 0.5) * scale + center.x;
     c.y = (gl_FragCoord.y / resolution.y - 0.5) * scale + center.y;
 
-    // Main Mandelbrot computation
+    float x, y, d;
     int i;
-    z = c;
-    for(i = 0; i < iter; i++) {
-        float x = (z.x * z.x - z.y * z.y) + c.x;
-        float y = (z.y * z.x + z.x * z.y) + c.y;
-
-        if((x * x + y * y) > 4.0) break;
-        z.x = x;
-        z.y = y;
+    vec2 z = c;
+    for(i = 0; i < n; ++i)
+    {
+        x = (z.x*z.x - z.y*z.y) + c.x;
+        y = (z.y*z.x + z.x*z.y) + c.y;
+        d = x*x + y*y;
+        if (d > 4.0) break;
+        z = vec2(x,y);
     }
-
-    // Convert iterations to color
-    float color = 1.0 - float(i) / float(iter);
-    gl_FragColor = color_scheme(color);
-
+    if ( i < n ) {
+        float nu = log(log(sqrt(d))/log_2)/log_2;
+        float index = float(i) + 1.0 - nu;
+        float v = pow(index/float(n),0.5);
+        gl_FragColor = vec4(hot(v),1.0);
+    } else {
+        gl_FragColor = vec4(hot(0.0),1.0);
+    }
 }
+
 """
 
 
@@ -93,23 +84,26 @@ class Canvas(app.Canvas):
 
         self.scale = self.program["scale"] = 3
         self.center = self.program["center"] = [-0.5, 0]
-        self.iterations = self.program["iter"] = 300
-        self.program['resolution'] = self.size
+        self.apply_zoom()
 
         self.bounds = [-2, 2]
         self.min_scale = 0.00005
         self.max_scale = 4
 
+        gloo.set_clear_color(color='black')
+
         self._timer = app.Timer('auto', connect=self.update, start=True)
 
-    def on_initialize(self, event):
-        gloo.set_clear_color(color='black')
+        self.show()
 
     def on_draw(self, event):
         self.program.draw()
 
     def on_resize(self, event):
-        width, height = event.size
+        self.apply_zoom()
+
+    def apply_zoom(self):
+        width, height = self.physical_size
         gloo.set_viewport(0, 0, width, height)
         self.program['resolution'] = [width, height]
 
@@ -155,7 +149,8 @@ class Canvas(app.Canvas):
         wheels :)
 
         """
-        if event.text == '+':
+
+        if event.text == '+' or event.text == '=':
             self.zoom(0.9)
         elif event.text == '-':
             self.zoom(1/0.9)
@@ -167,7 +162,7 @@ class Canvas(app.Canvas):
         while zooming. mouse_coords should come from MouseEvent.pos.
 
         """
-        if mouse_coords:  # Record the position of the mouse
+        if mouse_coords is not None:  # Record the position of the mouse
             x, y = float(mouse_coords[0]), float(mouse_coords[1])
             x0, y0 = self.pixel_to_coords(x, y)
 
@@ -175,12 +170,12 @@ class Canvas(app.Canvas):
         self.scale = max(min(self.scale, self.max_scale), self.min_scale)
         self.program["scale"] = self.scale
 
-        if mouse_coords:  # Translate so the mouse point is stationary
+        # Translate so the mouse point is stationary
+        if mouse_coords is not None:
             x1, y1 = self.pixel_to_coords(x, y)
             self.translate_center(x1 - x0, y1 - y0)
 
 
 if __name__ == '__main__':
     canvas = Canvas(size=(800, 800), keys='interactive')
-    canvas.show()
     app.run()

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """
@@ -15,6 +15,9 @@ from ..base import (BaseApplicationBackend, BaseCanvasBackend,
                     BaseTimerBackend)
 from ...util import keys
 from ...util.ptime import time
+from ... import config
+
+USE_EGL = config['gl_backend'].lower().startswith('es')
 
 
 # -------------------------------------------------------------------- init ---
@@ -83,7 +86,10 @@ except Exception as exp:
     class _Window(object):
         pass
 else:
-    available, testable, why_not = True, True, None
+    if USE_EGL:
+        available, testable, why_not = False, False, 'EGL not supported'
+    else:
+        available, testable, why_not = True, True, None
     which = 'pyglet ' + str(pyglet.version)
     _Window = pyglet.window.Window
 
@@ -103,6 +109,7 @@ capability = dict(  # things that can be set by the backend
     multi_window=True,
     scroll=True,
     parent=False,
+    always_on_top=False,
 )
 
 
@@ -167,53 +174,49 @@ class CanvasBackend(_Window, BaseCanvasBackend):
     # args are for BaseCanvasBackend, kwargs are for us.
     def __init__(self, *args, **kwargs):
         BaseCanvasBackend.__init__(self, *args)
-        title, size, position, show, vsync, resize, dec, fs, parent, context, \
-            = self._process_backend_kwargs(kwargs)
-        
+        p = self._process_backend_kwargs(kwargs)
+
+        # Deal with config
+        config = _set_config(p.context.config)  # Also used further below
         # Deal with context
-        if not context.istaken:
-            context.take('pyglet', self)
-            config = _set_config(context.config)  # Also used further below
-        elif context.istaken == 'pyglet':
-            config = None  # contexts are shared by default in Pyglet
-        else:
-            raise RuntimeError('Different backends cannot share a context.')
-        
-        style = (pyglet.window.Window.WINDOW_STYLE_DEFAULT if dec else
+        p.context.shared.add_ref('pyglet', self)
+        # contexts are shared by default in Pyglet
+
+        style = (pyglet.window.Window.WINDOW_STYLE_DEFAULT if p.decorate else
                  pyglet.window.Window.WINDOW_STYLE_BORDERLESS)
         # We keep track of modifier keys so we can pass them to mouse_motion
         self._current_modifiers = set()
-        #self._buttons_accepted = 0
+        # self._buttons_accepted = 0
         self._draw_ok = False  # whether it is ok to draw yet
         self._pending_position = None
-        if fs is not False:
+        if p.fullscreen is not False:
             screen = pyglet.window.get_platform().get_default_display()
             self._vispy_fullscreen = True
-            if fs is True:
+            if p.fullscreen is True:
                 self._vispy_screen = screen.get_default_screen()
             else:
                 screen = screen.get_screens()
-                if fs >= len(screen):
+                if p.fullscreen >= len(screen):
                     raise RuntimeError('fullscreen must be < %s'
                                        % len(screen))
-                self._vispy_screen = screen[fs]
+                self._vispy_screen = screen[p.fullscreen]
         else:
             self._vispy_fullscreen = False
             self._vispy_screen = None
         self._initialize_sent = False
-        pyglet.window.Window.__init__(self, width=size[0], height=size[1],
-                                      caption=title, visible=show,
-                                      config=config, vsync=vsync,
-                                      resizable=resize, style=style,
+        pyglet.window.Window.__init__(self, width=p.size[0], height=p.size[1],
+                                      caption=p.title, visible=p.show,
+                                      config=config, vsync=p.vsync,
+                                      resizable=p.resizable, style=style,
                                       screen=self._vispy_screen)
-        if position is not None:
-            self._vispy_set_position(*position)
-    
+        if p.position is not None:
+            self._vispy_set_position(*p.position)
+
     def _vispy_warmup(self):
         etime = time() + 0.1
         while time() < etime:
             sleep(0.01)
-            self._vispy_set_current()
+            self._vispy_canvas.set_current()
             self._vispy_canvas.app.process_events()
 
     # Override these ...
@@ -233,7 +236,6 @@ class CanvasBackend(_Window, BaseCanvasBackend):
 
     def _vispy_set_current(self):
         # Make this the current context
-        self._vispy_context.set_current(False)  # Mark as current
         self.switch_to()
 
     def _vispy_swap_buffers(self):
@@ -289,7 +291,7 @@ class CanvasBackend(_Window, BaseCanvasBackend):
             return
         if not self._initialize_sent:
             self._initialize_sent = True
-            self._vispy_set_current()
+            self._vispy_canvas.set_current()
             self._vispy_canvas.events.initialize()
         # Set location now if we must. For some reason we get weird
         # offsets in viewport if set_location is called before the
@@ -316,7 +318,7 @@ class CanvasBackend(_Window, BaseCanvasBackend):
         if not self._draw_ok or self._vispy_canvas is None:
             return
         # (0, 0, self.width, self.height))
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.draw(region=None)
 
     def on_mouse_press(self, x, y, button, modifiers=None):

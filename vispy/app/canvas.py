@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 from __future__ import division, print_function
@@ -10,26 +10,20 @@ from time import sleep
 
 from ..util.event import EmitterGroup, Event, WarningEmitter
 from ..util.ptime import time
+from ..util.dpi import get_dpi
+from ..util import config as util_config
 from ..ext.six import string_types
 from . import Application, use_app
-from ..gloo.context import GLContext
+from ..gloo.context import (GLContext, set_current_canvas, forget_canvas)
+
 
 # todo: add functions for asking about current mouse/keyboard state
 # todo: add hover enter/exit events
 # todo: add focus events
 
 
-def _gloo_initialize(event):
-    from ..gloo import gl_initialize
-    gl_initialize()
-
-
 class Canvas(object):
     """Representation of a GUI element with an OpenGL context
-
-    Receives the following events:
-    initialize, resize, draw, mouse_press, mouse_release, mouse_move,
-    mouse_wheel, key_press, key_release, stylus, touch, close
 
     Parameters
     ----------
@@ -52,8 +46,6 @@ class Canvas(object):
         Note the canvas application can be accessed at ``canvas.app``.
     create_native : bool
         Whether to create the widget immediately. Default True.
-    init_gloo : bool
-        Initialize standard values in gloo (e.g., ``GL_POINT_SPRITE``).
     vsync : bool
         Enable vertical synchronization.
     resizable : bool
@@ -63,13 +55,13 @@ class Canvas(object):
     fullscreen : bool | int
         If False, windowed mode is used (default). If True, the default
         monitor is used. If int, the given monitor number is used.
-    context : dict | instance GLContext | None
-        OpenGL configuration to use when creating the context for the canvas,
-        or a context to share. If None, ``vispy.gloo.get_default_config`` will
-        be used to set the OpenGL context parameters. Alternatively, the
-        ``canvas.context`` property from an existing canvas (using the
-        same backend) will return a ``GLContext`` that can be used,
-        thereby sharing the existing context.
+    config : dict
+        A dict with OpenGL configuration options, which is combined
+        with the default configuration options and used to initialize
+        the context. See ``canvas.context.config`` for possible
+        options.
+    shared : Canvas | GLContext | None
+        An existing canvas or context to share OpenGL objects with.
     keys : str | dict | None
         Default key mapping to use. If 'interactive', escape and F11 will
         close the canvas and toggle full-screen mode, respectively.
@@ -78,20 +70,56 @@ class Canvas(object):
         be callable.
     parent : widget-object
         The parent widget if this makes sense for the used backend.
+    dpi : float | None
+        Resolution in dots-per-inch to use for the canvas. If dpi is None,
+        then the value will be determined by querying the global config first,
+        and then the operating system.
+    always_on_top : bool
+        If True, try to create the window in always-on-top mode.
+    px_scale : int > 0
+        A scale factor to apply between logical and physical pixels in addition
+        to the actual scale factor determined by the backend. This option
+        allows the scale factor to be adjusted for testing.
+
+    Notes
+    -----
+    The `Canvas` receives the following events:
+
+        * initialize
+        * resize
+        * draw
+        * mouse_press
+        * mouse_release
+        * mouse_double_click
+        * mouse_move
+        * mouse_wheel
+        * key_press
+        * key_release
+        * stylus
+        * touch
+        * close
+
+    The ordering of the mouse_double_click, mouse_press, and mouse_release
+    events are not guaranteed to be consistent between backends. Only certain
+    backends natively support double-clicking (currently Qt and WX); on other
+    backends, they are detected manually with a fixed time delay.
+    This can cause problems with accessibility, as increasing the OS detection
+    time or using a dedicated double-click button will not be respected.
     """
-    
+
     def __init__(self, title='Vispy canvas', size=(800, 600), position=None,
                  show=False, autoswap=True, app=None, create_native=True,
-                 init_gloo=True, vsync=False, resizable=True, decorate=True,
-                 fullscreen=False, context=None, keys=None, parent=None):
+                 vsync=False, resizable=True, decorate=True, fullscreen=False,
+                 config=None, shared=None, keys=None, parent=None, dpi=None,
+                 always_on_top=False, px_scale=1):
 
-        size = [int(s) for s in size]
+        size = tuple(int(s) * px_scale for s in size)
         if len(size) != 2:
             raise ValueError('size must be a 2-element list')
         title = str(title)
         if not isinstance(fullscreen, (bool, int)):
             raise TypeError('fullscreen must be bool or int')
-        
+
         # Initialize some values
         self._autoswap = autoswap
         self._title = title
@@ -101,7 +129,14 @@ class Canvas(object):
         self._fps_callback = None
         self._backend = None
         self._closed = False
-        
+        self._px_scale = int(px_scale)
+
+        if dpi is None:
+            dpi = util_config['dpi']
+        if dpi is None:
+            dpi = get_dpi(raise_error=False)
+        self.dpi = dpi
+
         # Create events
         self.events = EmitterGroup(source=self,
                                    initialize=Event,
@@ -109,6 +144,7 @@ class Canvas(object):
                                    draw=DrawEvent,
                                    mouse_press=MouseEvent,
                                    mouse_release=MouseEvent,
+                                   mouse_double_click=MouseEvent,
                                    mouse_move=MouseEvent,
                                    mouse_wheel=MouseEvent,
                                    key_press=KeyEvent,
@@ -126,42 +162,48 @@ class Canvas(object):
         self.events.add(paint=emitter)
         self.events.draw.connect(self.events.paint)
 
-        # Initialize gloo settings
-        if init_gloo:
-            self.events.initialize.connect(_gloo_initialize,
-                                           ref='gloo_initialize')
-        
         # Get app instance
         if app is None:
-            self._app = use_app()
+            self._app = use_app(call_reuse=False)
         elif isinstance(app, Application):
             self._app = app
         elif isinstance(app, string_types):
             self._app = Application(app)
         else:
             raise ValueError('Invalid value for app %r' % app)
-        
-        # Ensure context is a GLContext object
-        context = context or GLContext()
-        if isinstance(context, dict):
-            context = GLContext(context)  # GLContext checks the dict keys
-        elif not isinstance(context, GLContext):
-            raise TypeError('context must be a dict or GLContext from '
-                            'a Canvas with the same backend, not %s'
-                            % type(context))
-        
+
+        # Check shared and context
+        if shared is None:
+            pass
+        elif isinstance(shared, Canvas):
+            shared = shared.context.shared
+        elif isinstance(shared, GLContext):
+            shared = shared.shared
+        else:
+            raise TypeError('shared must be a Canvas, not %s' % type(shared))
+        config = config or {}
+        if not isinstance(config, dict):
+            raise TypeError('config must be a dict, not %s' % type(config))
+
+        # Create new context
+        self._context = GLContext(config, shared)
+
         # Deal with special keys
         self._set_keys(keys)
-        
+
         # store arguments that get set on Canvas init
         kwargs = dict(title=title, size=size, position=position, show=show,
                       vsync=vsync, resizable=resizable, decorate=decorate,
-                      fullscreen=fullscreen, context=context, parent=parent)
+                      fullscreen=fullscreen, context=self._context,
+                      parent=parent, always_on_top=always_on_top)
         self._backend_kwargs = kwargs
-        
+
         # Create widget now (always do this *last*, after all err checks)
         if create_native:
             self.create_native()
+
+            # Now we're ready to become current
+            self.set_current()
 
         if '--vispy-fps' in sys.argv:
             self.measure_fps()
@@ -176,11 +218,13 @@ class Canvas(object):
         assert self._app.native
         # Instantiate the backend with the right class
         self._app.backend_module.CanvasBackend(self, **self._backend_kwargs)
-        # self._backend = set by BaseCanvasBackend 
+        # self._backend = set by BaseCanvasBackend
         self._backend_kwargs = None  # Clean up
-        
+
+        # Connect to draw event (append to the end)
+        # Process GLIR commands at each paint event
+        self.events.draw.connect(self.context.flush_commands, position='last')
         if self._autoswap:
-            # append to the end
             self.events.draw.connect((self, 'swap_buffers'),
                                      ref=True, position='last')
 
@@ -224,8 +268,11 @@ class Canvas(object):
     @property
     def context(self):
         """ The OpenGL context of the native widget
+
+        It gives access to OpenGL functions to call on this canvas object,
+        and to the shared context namespace.
         """
-        return self._backend._vispy_context
+        return self._context
 
     @property
     def app(self):
@@ -239,12 +286,30 @@ class Canvas(object):
         """
         return self._backend._vispy_get_native_canvas()
 
+    @property
+    def dpi(self):
+        """ The physical resolution of the canvas in dots per inch.
+        """
+        return self._dpi
+
+    @dpi.setter
+    def dpi(self, dpi):
+        self._dpi = float(dpi)
+        self.update()
+
     def connect(self, fun):
-        """ Connect a function to an event. The name of the function
+        """ Connect a function to an event
+
+        The name of the function
         should be on_X, with X the name of the event (e.g. 'on_draw').
 
-        This method is typically used as a decorater on a function
+        This method is typically used as a decorator on a function
         definition for an event handler.
+
+        Parameters
+        ----------
+        fun : callable
+            The function.
         """
         # Get and check name
         name = fun.__name__
@@ -266,11 +331,32 @@ class Canvas(object):
     @property
     def size(self):
         """ The size of canvas/window """
-        return self._backend._vispy_get_size()
+        size = self._backend._vispy_get_size()
+        return (size[0] // self._px_scale, size[1] // self._px_scale)
 
     @size.setter
     def size(self, size):
-        return self._backend._vispy_set_size(size[0], size[1])
+        return self._backend._vispy_set_size(size[0] * self._px_scale,
+                                             size[1] * self._px_scale)
+
+    @property
+    def physical_size(self):
+        """ The physical size of the canvas/window, which may differ from the
+        size property on backends that expose HiDPI """
+        return self._backend._vispy_get_physical_size()
+
+    @property
+    def pixel_scale(self):
+        """ The ratio between the number of logical pixels, or 'points', and
+        the physical pixels on the device. In most cases this will be 1.0,
+        but on certain backends this will be greater than 1. This should be
+        used as a scaling factor when writing your own visualisations
+        with Gloo (make a copy and multiply all your logical pixel values
+        by it) but you should rarely, if ever, need to use this in your own
+        Visuals or SceneGraph visualisations; instead you should apply the
+        canvas_fb_transform in the SceneGraph canvas. """
+
+        return self._px_scale * self.physical_size[0] // self.size[0]
 
     @property
     def fullscreen(self):
@@ -305,34 +391,62 @@ class Canvas(object):
     # ----------------------------------------------------------------- fps ---
     @property
     def fps(self):
-        """ The fps of canvas/window, measured as the rate that events.draw
-        is emitted. """
+        """The fps of canvas/window, as the rate that events.draw is emitted
+        """
         return self._fps
 
+    def set_current(self, event=None):
+        """Make this the active GL canvas
+
+        Parameters
+        ----------
+        event : None
+            Not used.
+        """
+        self._backend._vispy_set_current()
+        set_current_canvas(self)
+
     def swap_buffers(self, event=None):
-        """ Swap GL buffers such that the offscreen buffer becomes visible.
+        """Swap GL buffers such that the offscreen buffer becomes visible
+
+        Parameters
+        ----------
+        event : None
+            Not used.
         """
         self._backend._vispy_swap_buffers()
 
-    def show(self, visible=True):
-        """ Show (or hide) the canvas """
-        return self._backend._vispy_set_visible(visible)
+    def show(self, visible=True, run=False):
+        """Show or hide the canvas
+
+        Parameters
+        ----------
+        visible : bool
+            Make the canvas visible.
+        run : bool
+            Run the backend event loop.
+        """
+        self._backend._vispy_set_visible(visible)
+        if run:
+            self.app.run()
 
     def update(self, event=None):
-        """ Inform the backend that the Canvas needs to be redrawn
-        
-        This method accepts an optional ``event`` argument so it can be used
-        as an event handler (the argument is ignored). 
+        """Inform the backend that the Canvas needs to be redrawn
+
+        Parameters
+        ----------
+        event : None
+            Not used.
         """
         if self._backend is not None:
-            return self._backend._vispy_update()
-        else:
-            return
+            self._backend._vispy_update()
 
     def close(self):
-        """ Close the canvas
+        """Close the canvas
 
-        Note: This will usually destroy the GL context. For Qt, the context
+        Notes
+        -----
+        This will usually destroy the GL context. For Qt, the context
         (and widget) will be destroyed only if the widget is top-level.
         To avoid having the widget destroyed (more like standard Qt
         behavior), consider making the widget a sub-widget.
@@ -341,11 +455,10 @@ class Canvas(object):
             self._closed = True
             self.events.close()
             self._backend._vispy_close()
+        forget_canvas(self)
 
     def _update_fps(self, event):
-        """ Updates the fps after every window and resets the basetime
-        and frame count to current time and 0, respectively
-        """
+        """Update the fps after every window"""
         self._frame_count += 1
         diff = time() - self._basetime
         if (diff > self._fps_window):
@@ -358,7 +471,7 @@ class Canvas(object):
         """Measure the current FPS
 
         Sets the update window, connects the draw event to update_fps
-        and sets the callback function. 
+        and sets the callback function.
 
         Parameters
         ----------
@@ -367,7 +480,7 @@ class Canvas(object):
         callback : function | str
             The function to call with the float FPS value, or the string
             to be formatted with the fps value and then printed. The
-            default is '%1.1f FPS'. If callback evaluates to False, the
+            default is ``'%1.1f FPS'``. If callback evaluates to False, the
             FPS measurement is stopped.
         """
         # Connect update_fps function to draw
@@ -375,7 +488,10 @@ class Canvas(object):
         if callback:
             if isinstance(callback, string_types):
                 callback_str = callback  # because callback gets overwritten
-                callback = lambda x: print(callback_str % x)
+
+                def callback(x):
+                    print(callback_str % x)
+
             self._fps_window = window
             self.events.draw.connect(self._update_fps)
             self._fps_callback = callback
@@ -384,8 +500,9 @@ class Canvas(object):
 
     # ---------------------------------------------------------------- misc ---
     def __repr__(self):
-        return ('<Vispy canvas (%s backend) at %s>'
-                % (self.app.backend_name, hex(id(self))))
+        return ('<%s (%s) at %s>'
+                % (self.__class__.__name__,
+                   self.app.backend_name, hex(id(self))))
 
     def __enter__(self):
         self.show()
@@ -395,64 +512,19 @@ class Canvas(object):
     def __exit__(self, type, value, traceback):
         # ensure all GL calls are complete
         if not self._closed:
-            from ..gloo import gl
             self._backend._vispy_set_current()
-            gl.glFinish()
+            self.context.finish()
             self.close()
         sleep(0.1)  # ensure window is really closed/destroyed
-
-    # def mouse_event(self, event):
-        #"""Called when a mouse input event has occurred (the mouse has moved,
-        # a button was pressed/released, or the wheel has moved)."""
-
-    # def key_event(self, event):
-        #"""Called when a keyboard event has occurred (a key was pressed or
-        # released while the canvas has focus)."""
-
-    # def touch_event(self, event):
-        #"""Called when the user touches the screen over a Canvas.
-
-        # Event properties:
-        #     event.touches
-        #     [ (x,y,pressure), ... ]
-        #"""
-
-    # def stylus_event(self, event):
-        #"""Called when a stylus has been used to interact with the Canvas.
-
-        # Event properties:
-        #     event.device
-        #     event.pos  (x,y)
-        #     event.pressure
-        #     event.angle
-        #"""
-
-    # def initialize_event(self, event):
-        #"""Called when the OpenGL context is initialy made available for this
-        # Canvas."""
-
-    # def resize_event(self, event):
-        #"""Called when the Canvas is resized.
-
-        # Event properties:
-        #     event.size  (w,h)
-        #"""
-
-    # def draw_event(self, event):
-        #"""Called when all or part of the Canvas needs to be redrawn.
-
-        # Event properties:
-        #     event.region  (x,y,w,h) region of Canvas requiring redraw
-        #"""
 
 
 # Event subclasses specific to the Canvas
 class MouseEvent(Event):
-
     """Mouse event class
 
     Note that each event object has an attribute for each of the input
-    arguments listed below.
+    arguments listed below, as well as a "time" attribute with the event's
+    precision start time.
 
     Parameters
     ----------
@@ -482,22 +554,22 @@ class MouseEvent(Event):
         allowing the entire drag to be reconstructed.
     native : object (optional)
        The native GUI event object
-    **kwds : keyword arguments
+    **kwargs : keyword arguments
         All extra keyword arguments become attributes of the event object.
-
     """
 
     def __init__(self, type, pos=None, button=None, buttons=None,
                  modifiers=None, delta=None, last_event=None, press_event=None,
-                 **kwds):
-        Event.__init__(self, type, **kwds)
-        self._pos = (0, 0) if (pos is None) else (pos[0], pos[1])
+                 **kwargs):
+        Event.__init__(self, type, **kwargs)
+        self._pos = np.array([0, 0]) if (pos is None) else np.array(pos)
         self._button = int(button) if (button is not None) else None
         self._buttons = [] if (buttons is None) else buttons
         self._modifiers = tuple(modifiers or ())
-        self._delta = (0.0, 0.0) if (delta is None) else (delta[0], delta[1])
+        self._delta = np.zeros(2) if (delta is None) else np.array(delta)
         self._last_event = last_event
         self._press_event = press_event
+        self._time = time()
 
     @property
     def pos(self):
@@ -526,6 +598,10 @@ class MouseEvent(Event):
     @property
     def last_event(self):
         return self._last_event
+
+    @property
+    def time(self):
+        return self._time
 
     def _forget_last_event(self):
         # Needed to break otherwise endless last-event chains
@@ -574,7 +650,6 @@ class MouseEvent(Event):
 
 
 class KeyEvent(Event):
-
     """Key event class
 
     Note that each event object has an attribute for each of the input
@@ -593,12 +668,12 @@ class KeyEvent(Event):
         time of the event (shift, control, alt, meta).
     native : object (optional)
        The native GUI event object
-    **kwds : keyword arguments
+    **kwargs : keyword arguments
         All extra keyword arguments become attributes of the event object.
     """
 
-    def __init__(self, type, key=None, text='', modifiers=None, **kwds):
-        Event.__init__(self, type, **kwds)
+    def __init__(self, type, key=None, text='', modifiers=None, **kwargs):
+        Event.__init__(self, type, **kwargs)
         self._key = key
         self._text = text
         self._modifiers = tuple(modifiers or ())
@@ -617,8 +692,7 @@ class KeyEvent(Event):
 
 
 class ResizeEvent(Event):
-
-    """ Resize event class
+    """Resize event class
 
     Note that each event object has an attribute for each of the input
     arguments listed below.
@@ -628,25 +702,34 @@ class ResizeEvent(Event):
     type : str
        String indicating the event type (e.g. mouse_press, key_release)
     size : (int, int)
-        The new size of the Canvas.
+        The new size of the Canvas, in points (logical pixels).
+    physical_size : (int, int)
+        The new physical size of the Canvas, in pixels.
     native : object (optional)
        The native GUI event object
-    **kwds : extra keyword arguments
+    **kwargs : extra keyword arguments
         All extra keyword arguments become attributes of the event object.
     """
 
-    def __init__(self, type, size=None, **kwds):
-        Event.__init__(self, type, **kwds)
+    def __init__(self, type, size=None, physical_size=None, **kwargs):
+        Event.__init__(self, type, **kwargs)
         self._size = tuple(size)
+        if physical_size is None:
+            self._physical_size = self._size
+        else:
+            self._physical_size = tuple(physical_size)
 
     @property
     def size(self):
         return self._size
 
+    @property
+    def physical_size(self):
+        return self._physical_size
+
 
 class DrawEvent(Event):
-
-    """ Draw event class
+    """Draw event class
 
     This type of event is sent to Canvas.events.draw when a redraw
     is required.
@@ -663,12 +746,12 @@ class DrawEvent(Event):
         If None, the entire canvas must be redrawn.
     native : object (optional)
        The native GUI event object
-    **kwds : extra keyword arguments
+    **kwargs : extra keyword arguments
         All extra keyword arguments become attributes of the event object.
     """
 
-    def __init__(self, type, region=None, **kwds):
-        Event.__init__(self, type, **kwds)
+    def __init__(self, type, region=None, **kwargs):
+        Event.__init__(self, type, **kwargs)
         self._region = region
 
     @property

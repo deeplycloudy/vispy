@@ -5,13 +5,14 @@
 # -----------------------------------------------------------------------------
 import numpy as np
 from numpy.testing import assert_allclose
-from nose.tools import assert_raises, assert_equal
 
 from vispy.app import Canvas
 from vispy.gloo import (Texture2D, Texture3D, Program, FrameBuffer,
-                        ColorBuffer, DepthBuffer, set_viewport, clear)
+                        RenderBuffer, set_viewport, clear)
 from vispy.gloo.util import draw_texture, _screenshot
-from vispy.testing import requires_application, has_pyopengl, run_tests_if_main
+from vispy.testing import (requires_application, has_pyopengl,
+                           run_tests_if_main,
+                           assert_raises, assert_equal)
 
 
 @requires_application()
@@ -26,12 +27,13 @@ def test_use_framebuffer():
     """Test drawing to a framebuffer"""
     shape = (100, 300)  # for some reason Windows wants a tall window...
     data = np.random.rand(*shape).astype(np.float32)
-    orig_tex = Texture2D(data)
     use_shape = shape + (3,)
-    fbo_tex = Texture2D(shape=use_shape, dtype=np.ubyte, format='rgb')
-    rbo = ColorBuffer(shape=shape)
-    fbo = FrameBuffer(color=fbo_tex)
     with Canvas(size=shape[::-1]) as c:
+        orig_tex = Texture2D(data)
+        fbo_tex = Texture2D(use_shape, format='rgb')
+        rbo = RenderBuffer(shape, 'color')
+        fbo = FrameBuffer(color=fbo_tex)
+        c.context.glir.set_verbose(True)
         assert_equal(c.size, shape[::-1])
         set_viewport((0, 0) + c.size)
         with fbo:
@@ -43,7 +45,7 @@ def test_use_framebuffer():
         assert_raises(TypeError, FrameBuffer.depth_buffer.fset, fbo, 1.)
         assert_raises(TypeError, FrameBuffer.stencil_buffer.fset, fbo, 1.)
         fbo.color_buffer = rbo
-        fbo.depth_buffer = DepthBuffer(shape)
+        fbo.depth_buffer = RenderBuffer(shape)
         fbo.stencil_buffer = None
         print((fbo.color_buffer, fbo.depth_buffer, fbo.stencil_buffer))
         clear(color='black')
@@ -61,9 +63,6 @@ def test_use_texture3D():
     vals = [0, 200, 100, 0, 255, 0, 100]
     d, h, w = len(vals), 3, 5
     data = np.zeros((d, h, w), np.float32)
-    if not has_pyopengl():
-        assert_raises(ImportError, Texture3D, data)
-        return
 
     VERT_SHADER = """
     attribute vec2 a_pos;
@@ -90,14 +89,18 @@ def test_use_texture3D():
     # populate the depth "slices" with different gray colors in the bottom left
     for ii, val in enumerate(vals):
         data[ii, :2, :3] = val / 255.
-    program = Program(VERT_SHADER, FRAG_SHADER)
-    program['a_pos'] = [[-1., -1.], [1., -1.], [-1., 1.], [1., 1.]]
-    tex = Texture3D(data, interpolation='nearest')
-    assert_equal(tex.width, w)
-    assert_equal(tex.height, h)
-    assert_equal(tex.depth, d)
-    program['u_texture'] = tex
-    with Canvas(size=(100, 100)):
+    with Canvas(size=(100, 100)) as c:
+        if not has_pyopengl():
+            t = Texture3D(data)
+            assert_raises(ImportError, t.glir.flush, c.context.shared.parser)
+            return
+        program = Program(VERT_SHADER, FRAG_SHADER)
+        program['a_pos'] = [[-1., -1.], [1., -1.], [-1., 1.], [1., 1.]]
+        tex = Texture3D(data, interpolation='nearest')
+        assert_equal(tex.width, w)
+        assert_equal(tex.height, h)
+        assert_equal(tex.depth, d)
+        program['u_texture'] = tex
         for ii, val in enumerate(vals):
             set_viewport(0, 0, w, h)
             clear(color='black')
@@ -110,5 +113,61 @@ def test_use_texture3D():
             expected[:2, :3] = val
             assert_allclose(out, expected, atol=1./255.)
 
+
+@requires_application()
+def test_use_uniforms():
+    """Test using uniform arrays"""
+    VERT_SHADER = """
+    attribute vec2 a_pos;
+    varying vec2 v_pos;
+
+    void main (void)
+    {
+        v_pos = a_pos;
+        gl_Position = vec4(a_pos, 0., 1.);
+    }
+    """
+
+    FRAG_SHADER = """
+    varying vec2 v_pos;
+    uniform vec3 u_color[2];
+
+    void main()
+    {
+        gl_FragColor = vec4((u_color[0] + u_color[1]) / 2., 1.);
+    }
+    """
+    shape = (300, 300)
+    with Canvas(size=shape) as c:
+        c.context.glir.set_verbose(True)
+        assert_equal(c.size, shape[::-1])
+        shape = (3, 3)
+        set_viewport((0, 0) + shape)
+        program = Program(VERT_SHADER, FRAG_SHADER)
+        program['a_pos'] = [[-1., -1.], [1., -1.], [-1., 1.], [1., 1.]]
+        program['u_color'] = np.ones((2, 3))
+        c.context.clear('k')
+        program.draw('triangle_strip')
+        out = _screenshot()
+        assert_allclose(out[:, :, 0] / 255., np.ones(shape), atol=1. / 255.)
+
+        # now set one element
+        program['u_color[1]'] = np.zeros(3, np.float32)
+        c.context.clear('k')
+        program.draw('triangle_strip')
+        out = _screenshot()
+        assert_allclose(out[:, :, 0] / 255., 127.5 / 255. * np.ones(shape),
+                        atol=1. / 255.)
+
+        # and the other
+        assert_raises(ValueError, program.__setitem__, 'u_color',
+                      np.zeros(3, np.float32))
+        program['u_color'] = np.zeros((2, 3), np.float32)
+        program['u_color[0]'] = np.ones(3, np.float32)
+        c.context.clear((0.33,) * 3)
+        program.draw('triangle_strip')
+        out = _screenshot()
+        assert_allclose(out[:, :, 0] / 255., 127.5 / 255. * np.ones(shape),
+                        atol=1. / 255.)
 
 run_tests_if_main()

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
+
+from ..util import SimpleBunch
+import time
 
 
 class BaseApplicationBackend(object):
@@ -20,12 +23,23 @@ class BaseApplicationBackend(object):
     def _vispy_run(self):
         raise NotImplementedError()
 
+    def _vispy_reuse(self):
+        # Does nothing by default.
+        pass
+
     def _vispy_quit(self):
         raise NotImplementedError()
 
     def _vispy_get_native_app(self):
         # Should return the native application object
         return self
+
+    # is called by inputhook.py for pauses
+    # to remove CPU stress
+    # this is virtual so that some backends which have specialize
+    # functionality to deal with user input / latency can use those methods
+    def _vispy_sleep(self, duration_sec):
+        time.sleep(duration_sec)
 
 
 class BaseCanvasBackend(object):
@@ -46,18 +60,19 @@ class BaseCanvasBackend(object):
         from .canvas import Canvas  # Avoid circular import
         assert isinstance(vispy_canvas, Canvas)
         self._vispy_canvas = vispy_canvas
-        
+
         # We set the _backend attribute of the vispy_canvas to self,
         # because at the end of the __init__ of the CanvasBackend
         # implementation there might be a call to show or draw. By
         # setting it here, we ensure that the Canvas is "ready to go".
         vispy_canvas._backend = self
-        
+
         # Data used in the construction of new mouse events
         self._vispy_mouse_data = {
             'buttons': [],
             'press_event': None,
             'last_event': None,
+            'last_mouse_press': None,
         }
 
     def _process_backend_kwargs(self, kwargs):
@@ -65,14 +80,10 @@ class BaseCanvasBackend(object):
         Also checks whether the values of the backend arguments do not
         violate the backend capabilities.
         """
-        
-        # Store context here
-        self._vispy_context = kwargs['context']
-        
         # Verify given argument with capability of the backend
         app = self._vispy_canvas.app
         capability = app.backend_module.capability
-        if kwargs['context'].istaken:
+        if kwargs['context'].shared.name:  # name already assigned: shared
             if not capability['context']:
                 raise RuntimeError('Cannot share context with this backend')
         for key in [key for (key, val) in capability.items() if not val]:
@@ -82,12 +93,16 @@ class BaseCanvasBackend(object):
             if bool(kwargs[key]) - invert:
                 raise RuntimeError('Config %s is not supported by backend %s'
                                    % (key, app.backend_name))
-        
+
         # Return items in sequence
+        out = SimpleBunch()
         keys = ['title', 'size', 'position', 'show', 'vsync', 'resizable',
-                'decorate', 'fullscreen', 'parent', 'context']
-        return [kwargs[k] for k in keys]
-    
+                'decorate', 'fullscreen', 'parent', 'context', 'always_on_top',
+                ]
+        for key in keys:
+            out[key] = kwargs[key]
+        return out
+
     def _vispy_set_current(self):
         # Make this the current context
         raise NotImplementedError()
@@ -128,6 +143,12 @@ class BaseCanvasBackend(object):
         # Should return widget size
         raise NotImplementedError()
 
+    def _vispy_get_physical_size(self):
+        # Should return physical widget size (actual number of screen pixels).
+        # This may differ from _vispy_get_size on backends that expose HiDPI
+        # screens. If not overriden, return the logical sizeself.
+        return self._vispy_get_size()
+
     def _vispy_get_position(self):
         # Should return widget position
         raise NotImplementedError()
@@ -147,20 +168,26 @@ class BaseCanvasBackend(object):
         # Most backends would not need to implement this
         return self
 
-    def _vispy_mouse_press(self, **kwds):
+    def _vispy_mouse_press(self, **kwargs):
         # default method for delivering mouse press events to the canvas
-        kwds.update(self._vispy_mouse_data)
-        ev = self._vispy_canvas.events.mouse_press(**kwds)
+        kwargs.update(self._vispy_mouse_data)
+        ev = self._vispy_canvas.events.mouse_press(**kwargs)
         if self._vispy_mouse_data['press_event'] is None:
             self._vispy_mouse_data['press_event'] = ev
 
         self._vispy_mouse_data['buttons'].append(ev.button)
         self._vispy_mouse_data['last_event'] = ev
+
+        if not getattr(self, '_double_click_supported', False):
+            # double-click events are not supported by this backend, so we
+            # detect them manually
+            self._vispy_detect_double_click(ev)
+
         return ev
 
-    def _vispy_mouse_move(self, **kwds):
+    def _vispy_mouse_move(self, **kwargs):
         # default method for delivering mouse move events to the canvas
-        kwds.update(self._vispy_mouse_data)
+        kwargs.update(self._vispy_mouse_data)
 
         # Break the chain of prior mouse events if no buttons are pressed
         # (this means that during a mouse drag, we have full access to every
@@ -170,22 +197,62 @@ class BaseCanvasBackend(object):
             if last_event is not None:
                 last_event._forget_last_event()
         else:
-            kwds['button'] = self._vispy_mouse_data['press_event'].button
+            kwargs['button'] = self._vispy_mouse_data['press_event'].button
 
-        ev = self._vispy_canvas.events.mouse_move(**kwds)
+        ev = self._vispy_canvas.events.mouse_move(**kwargs)
         self._vispy_mouse_data['last_event'] = ev
         return ev
 
-    def _vispy_mouse_release(self, **kwds):
+    def _vispy_mouse_release(self, **kwargs):
         # default method for delivering mouse release events to the canvas
-        kwds.update(self._vispy_mouse_data)
-        ev = self._vispy_canvas.events.mouse_release(**kwds)
-        if ev.button == self._vispy_mouse_data['press_event'].button:
+        kwargs.update(self._vispy_mouse_data)
+
+        ev = self._vispy_canvas.events.mouse_release(**kwargs)
+        if (self._vispy_mouse_data['press_event']
+                and self._vispy_mouse_data['press_event'].button == ev.button):
             self._vispy_mouse_data['press_event'] = None
 
-        self._vispy_mouse_data['buttons'].remove(ev.button)
+        if ev.button in self._vispy_mouse_data['buttons']:
+            self._vispy_mouse_data['buttons'].remove(ev.button)
+        self._vispy_mouse_data['last_event'] = ev
+
+        return ev
+
+    def _vispy_mouse_double_click(self, **kwargs):
+        # default method for delivering double-click events to the canvas
+        kwargs.update(self._vispy_mouse_data)
+
+        ev = self._vispy_canvas.events.mouse_double_click(**kwargs)
         self._vispy_mouse_data['last_event'] = ev
         return ev
+
+    def _vispy_detect_double_click(self, ev, **kwargs):
+        # Called on every mouse_press or mouse_release, and calls
+        # _vispy_mouse_double_click if a double-click is calculated.
+        # Should be overridden with an empty function on backends which
+        # natively support double-clicking.
+
+        dt_max = 0.3  # time in seconds for a double-click detection
+
+        lastev = self._vispy_mouse_data['last_mouse_press']
+
+        if lastev is None:
+            self._vispy_mouse_data['last_mouse_press'] = ev
+            return
+
+        assert lastev.type == 'mouse_press'
+        assert ev.type == 'mouse_press'
+
+        # For a double-click to be detected, the button should be the same,
+        # the position should be the same, and the two mouse-presses should
+        # be within dt_max.
+        if ((ev.time - lastev.time <= dt_max) &
+           (lastev.pos[0] - ev.pos[0] == 0) &
+           (lastev.pos[1] - ev.pos[1] == 0) &
+           (lastev.button == ev.button)):
+            self._vispy_mouse_double_click(**kwargs)
+
+        self._vispy_mouse_data['last_mouse_press'] = ev
 
 
 class BaseTimerBackend(object):

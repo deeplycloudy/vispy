@@ -7,12 +7,10 @@ The only exception is glCompressedTexImage2D and glCompressedTexSubImage2D.
 
 import sys
 
-from nose.tools import assert_equal, assert_true  # noqa
-
 from vispy.app import Canvas
 from numpy.testing import assert_almost_equal
 from vispy.testing import (requires_application, requires_pyopengl, SkipTest,
-                           glut_skip, run_tests_if_main)
+                           run_tests_if_main, assert_equal, assert_true)
 from vispy.ext.six import string_types
 from vispy.util import use_log_level
 from vispy.gloo import gl
@@ -25,36 +23,44 @@ def teardown_module():
 @requires_application()
 def test_basics_desktop():
     """ Test desktop GL backend for basic functionality. """
-    glut_skip()
-    _test_basics('desktop')
+    _test_basics('gl2')
+    with Canvas():
+        _test_setting_parameters()
+        _test_enabling_disabling()
+        _test_setting_stuff()
+        _test_object_creation_and_deletion()
+        _test_fbo()
+        try:
+            gl.gl2._get_gl_func('foo', None, ())
+        except RuntimeError as exp:
+            exp = str(exp)
+            assert 'version' in exp
+            assert 'unknown' not in exp
+        gl.glFinish()
 
 
 @requires_application()
 def test_functionality_proxy():
     """ Test GL proxy class for basic functionality. """
     # By using debug mode, we are using the proxy class
-    glut_skip()
-    _test_basics('desktop debug')
+    _test_basics('gl2 debug')
 
 
 @requires_application()
 @requires_pyopengl()
 def test_basics_pypengl():
     """ Test pyopengl GL backend for basic functionality. """
-    glut_skip()
-    _test_basics('pyopengl')
+    _test_basics('pyopengl2')
 
 
 @requires_application()
-def test_functionality_angle():
-    """ Test angle GL backend for basic functionality. """
+def test_functionality_es2():
+    """ Test es2 GL backend for basic functionality. """
     if True:
-        raise SkipTest('Skip Angle functionality test for now.')
+        raise SkipTest('Skip es2 functionality test for now.')
     if sys.platform.startswith('win'):
-        raise SkipTest('Can only test angle functionality on Windows.')
-
-    glut_skip()
-    _test_basics('angle')
+        raise SkipTest('Can only test es2 functionality on Windows.')
+    _test_basics('es2')
 
 
 def _test_basics(backend):
@@ -91,7 +97,7 @@ def _test_setting_parameters():
     val = 0.2, 0.3
     gl.glDepthRange(*val)
     assert_almost_equal(gl.glGetParameter(gl.GL_DEPTH_RANGE), val)
-    
+
     gl.check_error()
 
 
@@ -110,7 +116,7 @@ def _test_enabling_disabling():
     gl.glDisable(gl.GL_BLEND)
     assert_equal(gl.glIsEnabled(gl.GL_BLEND), False)
     assert_equal(gl.glGetParameter(gl.GL_BLEND), 0)
-    
+
     gl.check_error()
 
 
@@ -162,7 +168,6 @@ def _test_setting_stuff():
     v = gl.glGetParameter(gl.GL_VERSION)
     assert_true(isinstance(v, string_types))
     assert_true(len(v) > 0)
-    
     gl.check_error()
 
 
@@ -263,8 +268,9 @@ def _test_fbo():
     assert_equal(width, w)
     
     # Touch copy tex functions
+    gl.glBindTexture(gl.GL_TEXTURE_2D, htex)
+    gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 5, 5, 5, 5, 20, 20)
     gl.glCopyTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, 0, 0, 30, 30,  0)
-    gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0,  20, 20,  0, 0, 10, 10)
     
     gl.check_error()
     

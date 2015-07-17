@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 import numpy as np
@@ -25,13 +25,16 @@ def test_font_glyph():
     # try both a vispy and system font
     sys_fonts = set(list_fonts()) - set(_vispy_fonts)
     assert_true(len(sys_fonts) > 0)
-    for face in ('OpenSans', list(sys_fonts)[0]):
+    for face in ['OpenSans'] + sorted(list(sys_fonts)):
+        print(face)  # useful for debugging
         font_dict = dict(face=face, size=12, bold=False, italic=False)
         glyphs_dict = dict()
         chars = 'foobar^C&#'
         for char in chars:
             # Warning that Arial might not exist
-            _load_glyph(font_dict, char, glyphs_dict)
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter('always')
+                _load_glyph(font_dict, char, glyphs_dict)
         assert_equal(len(glyphs_dict), np.unique([c for c in chars]).size)
 
 

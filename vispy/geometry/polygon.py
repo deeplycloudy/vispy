@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 
@@ -17,10 +17,10 @@ class PolygonData(object):
     vertices : (Nv, 3) array
         Vertex coordinates. If faces is not specified, then this will instead
         be interpreted as (Nf, 3, 3) array of coordinates.
-    faces : (Nf, 3) array
-        Indexes into the vertex array.
     edges : (Nv, 2) array
         Constraining edges specified by vertex indices.
+    faces : (Nf, 3) array
+        Indexes into the vertex array.
 
     Notes
     -----
@@ -116,13 +116,13 @@ class PolygonData(object):
         npts = self._vertices.shape[0]
         if np.any(self._vertices[0] != self._vertices[1]):
             # start != end, so edges must wrap around to beginning.
-            edges = np.empty((npts, 2), dtype=np.uint)
+            edges = np.empty((npts, 2), dtype=np.uint32)
             edges[:, 0] = np.arange(npts)
             edges[:, 1] = edges[:, 0] + 1
             edges[-1, 1] = 0
         else:
             # start == end; no wrapping required.
-            edges = np.empty((npts-1, 2), dtype=np.uint)
+            edges = np.empty((npts-1, 2), dtype=np.uint32)
             edges[:, 0] = np.arange(npts)
             edges[:, 1] = edges[:, 0] + 1
 
@@ -133,5 +133,10 @@ class PolygonData(object):
     def add_vertex(self, vertex):
         """
         Adds given vertex and retriangulates to generate new faces.
+
+        Parameters
+        ----------
+        vertex : array-like
+            The vertex to add.
         """
-        pass
+        raise NotImplementedError

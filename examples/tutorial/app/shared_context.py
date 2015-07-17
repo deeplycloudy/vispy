@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: testskip
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
@@ -40,7 +40,7 @@ class Window(QtGui.QWidget):
         box.addWidget(self.canvas_0.native)
 
         # pass the context from the first canvas to the second
-        self.canvas_1 = SceneCanvas(bgcolor='w', context=self.canvas_0.context)
+        self.canvas_1 = SceneCanvas(bgcolor='w', shared=self.canvas_0.context)
         self.vb_1 = ViewBox(parent=self.canvas_1.scene, bgcolor='b')
         self.vb_1.camera.rect = -1, -1, 2, 2
         self.canvas_1.events.resize.connect(partial(on_resize,
@@ -55,6 +55,7 @@ class Window(QtGui.QWidget):
 
     def on_init(self, event):
         self.text = Text('Initialized', font_size=40.,
+                         anchor_x='left', anchor_y='top',
                          parent=[self.vb_0.scene, self.vb_1.scene])
 
     def on_timer(self, event):

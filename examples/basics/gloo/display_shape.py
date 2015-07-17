@@ -44,11 +44,12 @@ class Canvas(app.Canvas):
         self._program['u_color'] = 0.2, 1.0, 0.4, 1
         self._program['a_position'] = gloo.VertexBuffer(vPosition)
 
-    def on_initialize(self, event):
         gloo.set_clear_color('white')
 
+        self.show()
+
     def on_resize(self, event):
-        width, height = event.size
+        width, height = event.physical_size
         gloo.set_viewport(0, 0, width, height)
 
     def on_draw(self, event):
@@ -58,5 +59,4 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     app.run()

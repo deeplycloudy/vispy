@@ -3,7 +3,7 @@ Vispy: interactive scientific visualization in Python
 
 Main website: http://vispy.org
 
-|Build Status| |Coverage Status| |Zenodo Link|
+|Build Status| |Appveyor Status| |Coverage Status| |Zenodo Link|
 
 ----
 
@@ -24,6 +24,7 @@ large datasets. Applications of Vispy include:
 Announcements
 -------------
 
+- **Release!** Version 0.4, May 22, 2015
 - `Vispy tutorial in the IPython Cookbook <http://ipython-books.github.io/featured-06/>`__
 - **Release!** Version 0.3, August 29, 2014
 - **EuroSciPy 2014**: talk at Saturday 30, and sprint at Sunday 31, August 2014
@@ -63,12 +64,16 @@ Installation
 ------------
 
 Vispy runs on Python 2.6+ and Python 3.3+ and depends on NumPy. You also
-need a backend (PyQt4/PySide, glfw, GLUT, pyglet, or SDL).
+need a backend (PyQt4/PySide, glfw, pyglet, SDL, or wx).
 
 As Vispy is under heavy development at this time, we highly recommend
 you to use the development version on Github (master branch). You need
 to clone the repository and install Vispy with
 ``python setup.py install``.
+
+If you need to install Python for the first time, consider using the
+`Anaconda <http://continuum.io/downloads>`_ Python distribution. It
+provides a convenient package management system.
 
 
 Structure of Vispy
@@ -77,7 +82,7 @@ Structure of Vispy
 Currently, the main subpackages are:
 
 -  **app**: integrates an event system and offers a unified interface on
-   top of many window backends (Qt4, wx, glfw, GLUT, IPython notebook
+   top of many window backends (Qt4, wx, glfw, IPython notebook
    with/without WebGL, and others). Relatively stable API.
 -  **gloo**: a Pythonic, object-oriented interface to OpenGL. Relatively
    stable API.
@@ -132,9 +137,11 @@ External links
 -  `Gallery <http://vispy.org/gallery.html>`__
 -  `Documentation <http://vispy.readthedocs.org>`__
 
-.. |Build Status| image:: https://travis-ci.org/vispy/vispy.png?branch=master
+.. |Build Status| image:: https://travis-ci.org/vispy/vispy.svg?branch=master
    :target: https://travis-ci.org/vispy/vispy
-.. |Coverage Status| image:: https://coveralls.io/repos/vispy/vispy/badge.png?branch=master
+.. |Appveyor Status| image:: https://ci.appveyor.com/api/projects/status/dsxgkrbfj29xf9ef/branch/master?svg=true
+   :target: https://ci.appveyor.com/project/Eric89GXL/vispy/branch/master
+.. |Coverage Status| image:: https://img.shields.io/coveralls/vispy/vispy/master.svg
    :target: https://coveralls.io/r/vispy/vispy?branch=master
-.. |Zenodo Link| image:: https://zenodo.org/badge/5822/vispy/vispy.png
-   :target: http://dx.doi.org/10.5281/zenodo.11532
+.. |Zenodo Link| image:: https://zenodo.org/badge/5822/vispy/vispy.svg
+   :target: http://dx.doi.org/10.5281/zenodo.17869

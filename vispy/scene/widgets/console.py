@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """ Fast and failsafe GL console """
@@ -9,7 +9,7 @@
 
 import numpy as np
 
-from ..shaders import ModularProgram
+from ...visuals.shaders import ModularProgram
 from .widget import Widget
 from ...gloo import VertexBuffer, set_state
 from ...color import Color
@@ -71,9 +71,10 @@ __font_6x8__ = np.array([
 ], dtype=np.float32)
 
 VERTEX_SHADER = """
-uniform float u_scale;
-uniform vec2 u_px_scale;
+uniform vec2 u_logical_scale;
+uniform float u_physical_scale;
 uniform vec4 u_color;
+uniform vec4 u_origin; 
 
 attribute vec2 a_position;
 attribute vec3 a_bytes_012;
@@ -84,9 +85,8 @@ varying vec3 v_bytes_012, v_bytes_345;
 
 void main (void)
 {
-    vec4 pos = $transform(vec4(0., 0., 0., 1.));
-    gl_Position = pos + vec4(a_position * u_px_scale * u_scale, 0., 0.);
-    gl_PointSize = 8.0 * u_scale;
+    gl_Position = u_origin + vec4(a_position * u_logical_scale, 0., 0.);
+    gl_PointSize = 8.0 * u_physical_scale;
     v_color = u_color;
     v_bytes_012 = a_bytes_012;
     v_bytes_345 = a_bytes_345;
@@ -205,21 +205,32 @@ class Console(Widget):
         self._current_sizes = new_sizes
 
     def draw(self, event):
+        """Draw the widget
+
+        Parameters
+        ----------
+        event : instance of Event
+            The draw event.
+        """
         super(Console, self).draw(event)
         if event is None:
             raise RuntimeError('Event cannot be None')
-        xform = event.render_transform.shader_map()
-        px_scale = event.framebuffer_cs.transform.scale[:2]
+        xform = event.get_full_transform()
+        tr = (event.document_to_framebuffer *
+              event.framebuffer_to_render)
+        logical_scale = np.diff(tr.map(([0, 1], [1, 0])), axis=0)[0, :2]
+        tr = event.document_to_framebuffer
+        log_to_phy = np.mean(np.diff(tr.map(([0, 1], [1, 0])), axis=0)[0, :2])
         n_pix = (self.font_size / 72.) * 92.  # num of pixels tall
         # The -2 here is because the char_height has a gap built in
         font_scale = max(n_pix / float((self._char_height-2)), 1)
         self._resize_buffers(font_scale)
         self._do_pending_writes()
-        self._program.vert['transform'] = xform
+        self._program['u_origin'] = xform.map((0, 0, 0, 1))
         self._program.prepare()
-        self._program['u_px_scale'] = px_scale
+        self._program['u_logical_scale'] = font_scale * logical_scale
         self._program['u_color'] = self.text_color.rgba
-        self._program['u_scale'] = font_scale
+        self._program['u_physical_scale'] = font_scale * log_to_phy
         self._program['a_position'] = self._position
         self._program['a_bytes_012'] = VertexBuffer(self._bytes_012)
         self._program['a_bytes_345'] = VertexBuffer(self._bytes_345)
@@ -252,6 +263,7 @@ class Console(Widget):
         # ensure we only have ASCII chars
         text = text.encode('utf-8').decode('ascii', errors='replace')
         self._pending_writes.append((text, wrap))
+        self.update()
 
     def _do_pending_writes(self):
         """Do any pending text writes"""

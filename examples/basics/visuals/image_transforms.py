@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # vispy: gallery 2
 
@@ -10,10 +10,11 @@ Simple demonstration of ImageVisual.
 import numpy as np
 import vispy.app
 from vispy import gloo
-from vispy.scene import visuals
-from vispy.scene.transforms import (AffineTransform, STTransform, arg_to_array,
-                                    LogTransform, PolarTransform, 
-                                    BaseTransform)
+from vispy import visuals
+from vispy.visuals.transforms import (AffineTransform, STTransform,
+                                      arg_to_array, TransformSystem,
+                                      LogTransform, PolarTransform,
+                                      BaseTransform)
 
 image = np.random.normal(size=(100, 100, 3))
 image[20:80, 20:80] += 3.
@@ -24,18 +25,21 @@ image = ((image-image.min()) *
          (253. / (image.max()-image.min()))).astype(np.ubyte)
 
 
-class Canvas(vispy.scene.SceneCanvas):
+class Canvas(vispy.app.Canvas):
     def __init__(self):
-        self.images = [visuals.Image(image, method='impostor')
+        vispy.app.Canvas.__init__(self, keys='interactive', size=(800, 800))
+
+        self.images = [visuals.ImageVisual(image, method='impostor')
                        for i in range(4)]
         self.images[0].transform = (STTransform(scale=(30, 30),
-                                                translate=(600, 600)) * 
+                                                translate=(600, 600)) *
                                     SineTransform() *
                                     STTransform(scale=(0.1, 0.1),
                                                 translate=(-5, -5)))
 
         tr = AffineTransform()
         tr.rotate(30, (0, 0, 1))
+        tr.rotate(40, (0, 1, 0))
         tr.scale((3, 3))
         self.images[1].transform = (STTransform(translate=(200, 600)) *
                                     tr *
@@ -53,15 +57,18 @@ class Canvas(vispy.scene.SceneCanvas):
                                     STTransform(scale=(np.pi/200, 0.005),
                                                 translate=(-3*np.pi/4., 0.1)))
 
-        vispy.scene.SceneCanvas.__init__(self, keys='interactive')
-        self.size = (800, 800)
+        for img in self.images:
+            img.tr_sys = TransformSystem(self)
+            img.tr_sys.visual_to_document = img.transform
+
         self.show()
 
     def on_draw(self, ev):
         gloo.clear(color='black', depth=True)
-        self.push_viewport((0, 0) + self.size)
+        gloo.set_viewport(0, 0, *self.physical_size)
+        # Create a TransformSystem that will tell the visual how to draw
         for img in self.images:
-            self.draw_visual(img)
+            img.draw(img.tr_sys)
 
 
 # A simple custom Transform

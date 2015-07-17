@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """ A ctypes-based API to EGL.
@@ -208,7 +208,7 @@ EGL_ALPHA_FORMAT_PRE = EGL_VG_ALPHA_FORMAT_PRE
 ## The functions
 
 _lib.eglGetDisplay.argtypes = _c_int,
-_lib.eglGetDisplay.restype = c_void_p
+_lib.eglGetDisplay.restype = _c_int
 _lib.eglInitialize.argtypes = c_void_p, _POINTER(_c_int), _POINTER(_c_int)
 _lib.eglTerminate.argtypes = c_void_p,
 _lib.eglChooseConfig.argtypes = (c_void_p, _POINTER(_c_int),

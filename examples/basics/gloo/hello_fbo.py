@@ -75,33 +75,30 @@ SIZE = 50
 class Canvas(app.Canvas):
 
     def __init__(self):
-        app.Canvas.__init__(self, keys='interactive')
-        self.size = 560, 420
+        app.Canvas.__init__(self, keys='interactive', size=(560, 420))
 
         # Create texture to render to
-        shape = self.size[1], self.size[0]
-        self._rendertex = gloo.Texture2D(shape=(shape + (3,)),
-                                         dtype=np.float32)
+        shape = self.physical_size[1], self.physical_size[0]
+        self._rendertex = gloo.Texture2D((shape + (3,)))
 
         # Create FBO, attach the color buffer and depth buffer
-        self._fbo = gloo.FrameBuffer(self._rendertex,
-                                     gloo.DepthBuffer(shape))
+        self._fbo = gloo.FrameBuffer(self._rendertex, gloo.RenderBuffer(shape))
 
         # Create program to render a shape
-        self._program1 = gloo.Program(gloo.VertexShader(VERT_SHADER1),
-                                      gloo.FragmentShader(FRAG_SHADER1))
+        self._program1 = gloo.Program(VERT_SHADER1, FRAG_SHADER1)
         self._program1['u_color'] = 0.9, 1.0, 0.4, 1
         self._program1['a_position'] = gloo.VertexBuffer(vPosition)
 
         # Create program to render FBO result
-        self._program2 = gloo.Program(gloo.VertexShader(VERT_SHADER2),
-                                      gloo.FragmentShader(FRAG_SHADER2))
+        self._program2 = gloo.Program(VERT_SHADER2, FRAG_SHADER2)
         self._program2['a_position'] = gloo.VertexBuffer(vPosition)
         self._program2['a_texcoord'] = gloo.VertexBuffer(vTexcoord)
         self._program2['u_texture1'] = self._rendertex
 
+        self.show()
+
     def on_resize(self, event):
-        width, height = event.size
+        width, height = event.physical_size
         gloo.set_viewport(0, 0, width, height)
 
     def on_draw(self, event):
@@ -109,7 +106,7 @@ class Canvas(app.Canvas):
         with self._fbo:
             gloo.set_clear_color((0.0, 0.0, 0.5, 1))
             gloo.clear(color=True, depth=True)
-            gloo.set_viewport(0, 0, *self.size)
+            gloo.set_viewport(0, 0, *self.physical_size)
             self._program1.draw('triangle_strip')
 
         # Now draw result to a full-screen quad
@@ -121,5 +118,4 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     app.run()

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 30
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
@@ -18,6 +18,7 @@ canvas = scene.SceneCanvas(keys='interactive', size=(400, 400))
 grid = canvas.central_widget.add_grid()
 
 vb = scene.widgets.ViewBox(border_color='b')
+vb.camera = 'panzoom'
 vb.camera.rect = -1, -1, 2, 2
 grid.add_widget(vb, row=0, col=0)
 text = Text('Starting timer...', color='w', font_size=24, parent=vb.scene)

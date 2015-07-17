@@ -7,16 +7,16 @@ from vispy import app
 import numpy as np
 
 VERT_SHADER = """
-#version 120
 attribute vec2 a_position;
+uniform float u_size;
+
 void main() {
     gl_Position = vec4(a_position, 0.0, 1.0);
-    gl_PointSize = 10.0;
+    gl_PointSize = u_size;
 }
 """
 
 FRAG_SHADER = """
-#version 120
 void main() {
     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 }
@@ -26,8 +26,15 @@ void main() {
 class Canvas(app.Canvas):
     def __init__(self):
         app.Canvas.__init__(self, keys='interactive')
+
+        ps = self.pixel_scale
+
         self.program = gloo.Program(VERT_SHADER, FRAG_SHADER)
-        self.program['a_position'] = np.random.uniform(-0.5, 0.5, size=(20, 2))
+        data = np.random.uniform(-0.5, 0.5, size=(20, 2))
+        self.program['a_position'] = data.astype(np.float32)
+        self.program['u_size'] = 20.*ps
+
+        self.show()
 
     def on_resize(self, event):
         width, height = event.size
@@ -39,6 +46,5 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     if sys.flags.interactive != 1:
         app.run()

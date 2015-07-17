@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
-from nose.tools import assert_raises, assert_equal
 import unittest
 import copy
 import functools
 
 from vispy.util.event import Event, EventEmitter
-from vispy.testing import run_tests_if_main
+from vispy.testing import run_tests_if_main, assert_raises, assert_equal
 
 
 class BasicEvent(Event):
@@ -16,9 +15,9 @@ class BasicEvent(Event):
 
 class TypedEvent(Event):
 
-    def __init__(self, **kwds):
-        kwds['type'] = 'typed_event'
-        Event.__init__(self, **kwds)
+    def __init__(self, **kwargs):
+        kwargs['type'] = 'typed_event'
+        Event.__init__(self, **kwargs)
 
 
 class TestEmitters(unittest.TestCase):
@@ -96,7 +95,7 @@ class TestEmitters(unittest.TestCase):
         # specifying non-event class should fail (eventually):
         class X:
 
-            def __init__(self, *args, **kwds):
+            def __init__(self, *args, **kwargs):
                 self.blocked = False
 
             def _push_source(self, s):
@@ -139,8 +138,8 @@ class TestEmitters(unittest.TestCase):
         """EventEmitter subclassing"""
         class MyEmitter(EventEmitter):
 
-            def _prepare_event(self, *args, **kwds):
-                ev = super(MyEmitter, self)._prepare_event(*args, **kwds)
+            def _prepare_event(self, *args, **kwargs):
+                ev = super(MyEmitter, self)._prepare_event(*args, **kwargs)
                 ev.test_tag = 1
                 return ev
         em = MyEmitter(type='test_event')
@@ -419,10 +418,10 @@ class TestEmitters(unittest.TestCase):
         em()
         assert self.result == 2
 
-    def try_emitter(self, em, **kwds):
+    def try_emitter(self, em, **kwargs):
         em.connect(self.record_event)
         self.result = None
-        return em(**kwds)
+        return em(**kwargs)
 
     def record_event(self, ev, key=None):
         # get a copy of all event attributes because these may change
@@ -451,7 +450,7 @@ class TestEmitters(unittest.TestCase):
                 self.result = {}
             self.result[key] = ev, attrs
 
-    def assert_result(self, key=None, **kwds):
+    def assert_result(self, key=None, **kwargs):
         assert (hasattr(self, 'result') and self.result is not None), \
             "No event recorded"
 
@@ -462,7 +461,7 @@ class TestEmitters(unittest.TestCase):
 
         assert isinstance(event, Event), "Emitted object is not Event instance"
 
-        for name, val in kwds.items():
+        for name, val in kwargs.items():
             if name == 'event':
                 assert event is val, "Event objects do not match"
 

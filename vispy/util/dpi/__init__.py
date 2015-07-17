@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
 The dpi module enables querying the OS for the screen DPI.
 """
 
-__all__ = ['get_dpi']
-
 import sys
+
+__all__ = ['get_dpi']
 
 if sys.platform.startswith('linux'):
     from ._linux import get_dpi

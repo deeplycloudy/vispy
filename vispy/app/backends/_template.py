@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """ This module provides an template for creating backends for vispy.
@@ -12,6 +12,9 @@ from __future__ import division
 from ..base import (BaseApplicationBackend, BaseCanvasBackend,
                     BaseTimerBackend)
 from ...util import keys
+from ... import config
+
+USE_EGL = config['gl_backend'].lower().startswith('es')
 
 
 # -------------------------------------------------------------------- init ---
@@ -75,6 +78,7 @@ capability = dict(
     multi_window=False,   # can use multiple windows at once
     scroll=False,         # scroll-wheel events are supported
     parent=False,         # can pass native widget backend parent
+    always_on_top=False,  # can be made always-on-top
 )
 
 
@@ -124,6 +128,8 @@ class CanvasBackend(BaseCanvasBackend):
                                               modifiers=())
         self._vispy_canvas.events.mouse_release(pos=(x, y), button=1,
                                                 modifiers=())
+        self._vispy_canvas.events.mouse_double_click(pos=(x, y), button=1,
+                                                     modifiers=())
         self._vispy_canvas.events.mouse_move(pos=(x, y), modifiers=())
         self._vispy_canvas.events.mouse_wheel(pos=(x, y), delta=(0, 0),
                                               modifiers=())
@@ -150,24 +156,22 @@ class CanvasBackend(BaseCanvasBackend):
         BaseCanvasBackend.__init__(self, *args)
         # We use _process_backend_kwargs() to "serialize" the kwargs
         # and to check whether they match this backend's capability
-        title, size, position, show, vsync, resize, dec, fs, parent, context, \
-            = self._process_backend_kwargs(kwargs)
-        
+        p = self._process_backend_kwargs(kwargs)
+
+        # Deal with config
+        # ... use context.config
         # Deal with context
-        if not context.istaken:
-            context.take('backend-name', self)
+        p.context.shared.add_ref('backend-name', self)
+        if p.context.shared.ref is self:
             self._native_context = None  # ...
-        elif context.istaken == 'backend-name':
-            self._native_context = context.backend_canvas._native_context
         else:
-            raise RuntimeError('Different backends cannot share a context.')
-        
+            self._native_context = p.context.shared.ref._native_context
+
         # NativeWidgetClass.__init__(self, foo, bar)
-    
+
     def _vispy_set_current(self):
         # Make this the current context
         raise NotImplementedError()
-        self._vispy_context.set_current(False)  # Mark as current
 
     def _vispy_swap_buffers(self):
         # Swap front and back buffer

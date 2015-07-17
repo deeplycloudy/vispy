@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author: Nicolas P .Rougier
@@ -108,7 +108,7 @@ class Canvas(app.Canvas):
         gl.glDrawArrays(gl.GL_TRIANGLE_STRIP, 0, 4)
 
     def on_resize(self, event):
-        gl.glViewport(0, 0, *event.size)
+        gl.glViewport(0, 0, *event.physical_size)
 
 if __name__ == '__main__':
     c = Canvas()

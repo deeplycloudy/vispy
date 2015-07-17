@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """Vispy configuration functions
@@ -17,29 +17,167 @@ import atexit
 from shutil import rmtree
 
 from .event import EmitterGroup, EventEmitter, Event
-from ..ext.six import string_types
 from .logs import logger, set_log_level, use_log_level
+from ..ext.six import string_types, file_types
+
+file_types = list(file_types)
+try:
+    file_types += [tempfile._TemporaryFileWrapper]  # Py3k Windows this happens
+except Exception:
+    pass
+file_types = tuple(file_types)
+
+config = None
+_data_path = None
+_allowed_config_keys = None
 
 
-class _TempDir(str):
-    """Class for creating and auto-destroying temp dir
-
-    This is designed to be used with testing modules.
-
-    We cannot simply use __del__() method for cleanup here because the rmtree
-    function may be cleaned up before this object, so we use the atexit module
-    instead.
+def _init():
+    """ Create global Config object, parse command flags
     """
-    def __new__(self):
-        new = str.__new__(self, tempfile.mkdtemp())
-        return new
+    global config, _data_path, _allowed_config_keys
 
-    def __init__(self):
-        self._path = self.__str__()
-        atexit.register(self.cleanup)
+    app_dir = _get_vispy_app_dir()
+    if app_dir is not None:
+        _data_path = op.join(app_dir, 'data')
+        _test_data_path = op.join(app_dir, 'test_data')
+    else:
+        _data_path = _test_data_path = None
 
-    def cleanup(self):
-        rmtree(self._path, ignore_errors=True)
+    # All allowed config keys and the types they may have
+    _allowed_config_keys = {
+        'data_path': string_types,
+        'default_backend': string_types,
+        'gl_backend': string_types,
+        'gl_debug': (bool,),
+        'glir_file': string_types+file_types,
+        'include_path': list,
+        'logging_level': string_types,
+        'qt_lib': string_types,
+        'dpi': (int, type(None)),
+        'profile': string_types + (type(None),),
+        'audit_tests': (bool,),
+        'test_data_path': string_types + (type(None),),
+    }
+
+    # Default values for all config options
+    default_config_options = {
+        'data_path': _data_path,
+        'default_backend': '',
+        'gl_backend': 'gl2',
+        'gl_debug': False,
+        'glir_file': '',
+        'include_path': [],
+        'logging_level': 'info',
+        'qt_lib': 'any',
+        'dpi': None,
+        'profile': None,
+        'audit_tests': False,
+        'test_data_path': _test_data_path,
+    }
+
+    config = Config(**default_config_options)
+
+    try:
+        config.update(**_load_config())
+    except Exception as err:
+        raise Exception('Error while reading vispy config file "%s":\n  %s' %
+                        (_get_config_fname(), err.message))
+    set_log_level(config['logging_level'])
+
+    _parse_command_line_arguments()
+
+
+###############################################################################
+# Command line flag parsing
+
+VISPY_HELP = """
+VisPy command line arguments:
+
+  --vispy-backend=(qt|pyqt4|pyqt5|pyside|glfw|pyglet|sdl2|wx)
+    Selects the backend system for VisPy to use. This will override the default
+    backend selection in your configuration file.
+
+  --vispy-log=(debug|info|warning|error|critical)[,search string]
+    Sets the verbosity of logging output. The default is 'warning'. If a search
+    string is given, messages will only be displayed if they match the string,
+    or if their call location (module.class:method(line) or
+    module:function(line)) matches the string.
+
+  --vispy-dpi=resolution
+    Force the screen resolution to a certain value (in pixels per inch). By
+    default, the OS is queried to determine the screen DPI.
+
+  --vispy-fps
+    Print the framerate (in Frames Per Second) in the console.
+
+  --vispy-gl-debug
+    Enables error checking for all OpenGL calls.
+
+  --vispy-glir-file
+    Export glir commands to specified file.
+
+  --vispy-profile=locations
+    Measure performance at specific code locations and display results. 
+    *locations* may be "all" or a comma-separated list of method names like
+    "SceneCanvas.draw_visual".
+
+  --vispy-cprofile
+    Enable profiling using the built-in cProfile module and display results
+    when the program exits.
+
+  --vispy-audit-tests
+    Enable user auditing of image test results.
+
+  --vispy-help
+    Display this help message.
+
+"""
+
+
+def _parse_command_line_arguments():
+    """ Transform vispy specific command line args to vispy config.
+    Put into a function so that any variables dont leak in the vispy namespace.
+    """
+    global config
+    # Get command line args for vispy
+    argnames = ['vispy-backend=', 'vispy-gl-debug', 'vispy-glir-file=',
+                'vispy-log=', 'vispy-help', 'vispy-profile=', 'vispy-cprofile',
+                'vispy-dpi=', 'vispy-audit-tests']
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], '', argnames)
+    except getopt.GetoptError:
+        opts = []
+    # Use them to set the config values
+    for o, a in opts:
+        if o.startswith('--vispy'):
+            if o == '--vispy-backend':
+                config['default_backend'] = a
+                logger.info('vispy backend: %s', a)
+            elif o == '--vispy-gl-debug':
+                config['gl_debug'] = True
+            elif o == '--vispy-glir-file':
+                config['glir_file'] = a
+            elif o == '--vispy-log':
+                if ',' in a:
+                    verbose, match = a.split(',')
+                else:
+                    verbose = a
+                    match = None
+                config['logging_level'] = a
+                set_log_level(verbose, match)
+            elif o == '--vispy-profile':
+                config['profile'] = a
+            elif o == '--vispy-cprofile':
+                _enable_profiling()
+            elif o == '--vispy-help':
+                print(VISPY_HELP)
+            elif o == '--vispy-dpi':
+                config['dpi'] = int(a)
+            elif o == '--vispy-audit-tests':
+                config['audit_tests'] = True
+            else:
+                logger.warning("Unsupported vispy flag: %s" % o)
 
 
 ###############################################################################
@@ -108,7 +246,6 @@ class Config(object):
     Config.events.changed - Emits ConfigEvent whenever the configuration
     changes.
     """
-
     def __init__(self, **kwargs):
         self.events = EmitterGroup(source=self)
         self.events['changed'] = EventEmitter(
@@ -128,14 +265,15 @@ class Config(object):
         self.events.changed(changes={item: val})
 
     def _check_key_val(self, key, val):
+        global _allowed_config_keys
         # check values against acceptable ones
-        known_keys = get_config_keys()
+        known_keys = _allowed_config_keys
         if key not in known_keys:
             raise KeyError('key "%s" not in known keys: "%s"'
                            % (key, known_keys))
-        if not isinstance(val, (string_types, bool)):
-            raise TypeError('Value for key "%s" must be str or bool, not %s'
-                            % (key, type(val)))
+        if not isinstance(val, known_keys[key]):
+            raise TypeError('Value for key "%s" must be one of %s, not %s.'
+                            % (key, known_keys[key], type(val)))
 
     def update(self, **kwargs):
         for key, val in kwargs.items():
@@ -148,15 +286,15 @@ class Config(object):
 
 
 def get_config_keys():
-    """The config keys known by vispy
+    """The config keys known by vispy and their allowed data types.
 
     Returns
     -------
-    keys : tuple
-        List of known config keys.
+    keys : dict
+        Dict of {key: (types,)} pairs.
     """
-    return ('data_path', 'default_backend', 'gl_debug', 'logging_level',
-            'qt_lib')
+    global _allowed_config_keys
+    return _allowed_config_keys.copy()
 
 
 def _get_config_fname():
@@ -202,22 +340,18 @@ def save_config(**kwargs):
         json.dump(current_config, fid, sort_keys=True, indent=0)
 
 
-_data_path = _get_vispy_app_dir()
-if _data_path is not None:
-    _data_path = op.join(_data_path, 'data')
-config = Config(default_backend='qt', qt_lib='any',
-                gl_debug=False, logging_level='info',
-                data_path=_data_path)
-try:
-    config.update(**_load_config())
-except Exception as err:
-    raise Exception('Error while reading vispy config file "%s":\n  %s' %
-                    (_get_config_fname(), err.message))
-set_log_level(config['logging_level'])
-
-
 def set_data_dir(directory=None, create=False, save=False):
-    """Set vispy data download directory"""
+    """Set vispy data download directory
+
+    Parameters
+    ----------
+    directory : str | None
+        The directory to use.
+    create : bool
+        If True, create directory if it doesn't exist.
+    save : bool
+        If True, save the configuration to the vispy config.
+    """
     if directory is None:
         directory = _data_path
         if _data_path is None:
@@ -231,72 +365,6 @@ def set_data_dir(directory=None, create=False, save=False):
     config.update(data_path=directory)
     if save:
         save_config(data_path=directory)
-
-
-###############################################################################
-# System information and parsing
-
-VISPY_HELP = """
-VisPy command line arguments:
-
-  --vispy-backend=(qt|pyqt|pyside|glut|glfw|pyglet)
-    Selects the backend system for VisPy to use. This will override the default
-    backend selection in your configuration file.
-    
-  --vispy-log=(debug|info|warning|error|critical)[,search string]
-    Sets the verbosity of logging output. The default is 'warning'. If a search
-    string is given, messages will only be displayed if they match the string,
-    or if their call location (module.class:method(line) or 
-    module:function(line)) matches the string.    
-    
-  --vispy-fps
-    Print the framerate (in Frames Per Second) in the console.
-    
-  --vispy-gl-debug
-    Enables error checking for all OpenGL calls.
-
-  --vispy-profile
-    Enable profiling and print the results when the program exits.
-    
-  --vispy-help
-    Display this help message.
-
-"""
-
-
-def _parse_command_line_arguments():
-    """ Transform vispy specific command line args to vispy config.
-    Put into a function so that any variables dont leak in the vispy namespace.
-    """
-    # Get command line args for vispy
-    argnames = ['vispy-backend=', 'vispy-gl-debug', 'vispy-log=', 'vispy-help',
-                'vispy-profile']
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], '', argnames)
-    except getopt.GetoptError:
-        opts = []
-    # Use them to set the config values
-    for o, a in opts:
-        if o.startswith('--vispy'):
-            if o == '--vispy-backend':
-                config['default_backend'] = a
-                logger.info('vispy backend: %s', a)
-            elif o == '--vispy-gl-debug':
-                config['gl_debug'] = True
-            elif o == '--vispy-log':
-                if ',' in a:
-                    verbose, match = a.split(',')
-                else:
-                    verbose = a
-                    match = None
-                config['logging_level'] = a
-                set_log_level(verbose, match)
-            elif o == '--vispy-profile':
-                _enable_profiling()
-            elif o == '--vispy-help':
-                print(VISPY_HELP)
-            else:
-                logger.warning("Unsupported vispy flag: %s" % o)
 
 
 def _enable_profiling():
@@ -346,7 +414,7 @@ def sys_info(fname=None, overwrite=False):
         from ..testing import has_backend
         # get default app
         with use_log_level('warning'):
-            app = use_app()  # suppress messages
+            app = use_app(call_reuse=False)  # suppress messages
         out += 'Platform: %s\n' % platform.platform()
         out += 'Python:   %s\n' % str(sys.version).replace('\n', ' ')
         out += 'Backend:  %s\n' % app.backend_name
@@ -358,17 +426,13 @@ def sys_info(fname=None, overwrite=False):
             out += '{0:<9} {1}\n'.format(backend + ':', which)
         out += '\n'
         # We need an OpenGL context to get GL info
-        if 'glut' in app.backend_name.lower():
-            # glut causes problems
-            out += 'OpenGL information omitted for glut backend\n'
-        else:
-            canvas = Canvas('Test', (10, 10), show=False, app=app)
-            canvas._backend._vispy_set_current()
-            out += 'GL version:  %r\n' % (gl.glGetParameter(gl.GL_VERSION),)
-            x_ = gl.GL_MAX_TEXTURE_SIZE
-            out += 'MAX_TEXTURE_SIZE: %r\n' % (gl.glGetParameter(x_),)
-            out += 'Extensions: %r\n' % (gl.glGetParameter(gl.GL_EXTENSIONS),)
-            canvas.close()
+        canvas = Canvas('Test', (10, 10), show=False, app=app)
+        canvas._backend._vispy_set_current()
+        out += 'GL version:  %r\n' % (gl.glGetParameter(gl.GL_VERSION),)
+        x_ = gl.GL_MAX_TEXTURE_SIZE
+        out += 'MAX_TEXTURE_SIZE: %r\n' % (gl.glGetParameter(x_),)
+        out += 'Extensions: %r\n' % (gl.glGetParameter(gl.GL_EXTENSIONS),)
+        canvas.close()
     except Exception:  # don't stop printing info
         out += '\nInfo-gathering error:\n%s' % traceback.format_exc()
         pass
@@ -376,3 +440,28 @@ def sys_info(fname=None, overwrite=False):
         with open(fname, 'w') as fid:
             fid.write(out)
     return out
+
+
+class _TempDir(str):
+    """Class for creating and auto-destroying temp dir
+
+    This is designed to be used with testing modules.
+
+    We cannot simply use __del__() method for cleanup here because the rmtree
+    function may be cleaned up before this object, so we use the atexit module
+    instead.
+    """
+    def __new__(self):
+        new = str.__new__(self, tempfile.mkdtemp())
+        return new
+
+    def __init__(self):
+        self._path = self.__str__()
+        atexit.register(self.cleanup)
+
+    def cleanup(self):
+        rmtree(self._path, ignore_errors=True)
+
+
+# initialize config options
+_init()

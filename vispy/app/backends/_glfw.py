@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 """
 vispy backend for glfw.
@@ -21,11 +21,15 @@ from __future__ import division
 import atexit
 from time import sleep
 import gc
+import os
 
 from ..base import (BaseApplicationBackend, BaseCanvasBackend,
                     BaseTimerBackend)
 from ...util import keys, logger
 from ...util.ptime import time
+from ... import config
+
+USE_EGL = config['gl_backend'].lower().startswith('es')
 
 
 # -------------------------------------------------------------------- init ---
@@ -85,8 +89,12 @@ try:
 except Exception as exp:
     available, testable, why_not, which = False, False, str(exp), None
 else:
-    available, testable, why_not = True, True, None
-    which = 'glfw ' + str(glfw.__version__)
+    if USE_EGL:
+        available, testable, why_not = False, False, 'EGL not supported'
+        which = 'glfw ' + str(glfw.__version__)
+    else:
+        available, testable, why_not = True, True, None
+        which = 'glfw ' + str(glfw.__version__)
 
 MOD_KEYS = [keys.SHIFT, keys.ALT, keys.CONTROL, keys.META]
 _GLFW_INITIALIZED = False
@@ -116,6 +124,7 @@ capability = dict(  # things that can be set by the backend
     multi_window=True,
     scroll=True,
     parent=False,
+    always_on_top=True,
 )
 
 
@@ -135,9 +144,9 @@ def _set_config(c):
 
     glfw.glfwWindowHint(glfw.GLFW_DEPTH_BITS, c['depth_size'])
     glfw.glfwWindowHint(glfw.GLFW_STENCIL_BITS, c['stencil_size'])
-    #glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MAJOR, c['major_version'])
-    #glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MINOR, c['minor_version'])
-    #glfw.glfwWindowHint(glfw.GLFW_SRGB_CAPABLE, c['srgb'])
+    # glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MAJOR, c['major_version'])
+    # glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MINOR, c['minor_version'])
+    # glfw.glfwWindowHint(glfw.GLFW_SRGB_CAPABLE, c['srgb'])
     glfw.glfwWindowHint(glfw.GLFW_SAMPLES, c['samples'])
     glfw.glfwWindowHint(glfw.GLFW_STEREO, c['stereo'])
     if not c['double_buffer']:
@@ -146,6 +155,14 @@ def _set_config(c):
 
 
 # ------------------------------------------------------------- application ---
+
+
+_glfw_errors = []
+
+
+def _error_callback(num, descr):
+    _glfw_errors.append('Error %s: %s' % (num, descr))
+
 
 class ApplicationBackend(BaseApplicationBackend):
 
@@ -191,8 +208,14 @@ class ApplicationBackend(BaseApplicationBackend):
     def _vispy_get_native_app(self):
         global _GLFW_INITIALIZED
         if not _GLFW_INITIALIZED:
-            if not glfw.glfwInit():  # only ever call once
-                raise OSError('Could not init glfw')
+            cwd = os.getcwd()
+            glfw.glfwSetErrorCallback(_error_callback)
+            try:
+                if not glfw.glfwInit():  # only ever call once
+                    raise OSError('Could not init glfw:\n%r' % _glfw_errors)
+            finally:
+                os.chdir(cwd)
+            glfw.glfwSetErrorCallback(0)
             atexit.register(glfw.glfwTerminate)
             _GLFW_INITIALIZED = True
         return glfw
@@ -207,56 +230,56 @@ class CanvasBackend(BaseCanvasBackend):
     # args are for BaseCanvasBackend, kwargs are for us.
     def __init__(self, *args, **kwargs):
         BaseCanvasBackend.__init__(self, *args)
-        title, size, position, show, vsync, resize, dec, fs, parent, context, \
-            = self._process_backend_kwargs(kwargs)
+        p = self._process_backend_kwargs(kwargs)
         self._initialized = False
-        
+
+        # Deal with config
+        _set_config(p.context.config)
         # Deal with context
-        if not context.istaken:
-            context.take('glfw', self)
-            _set_config(context.config)
+        p.context.shared.add_ref('glfw', self)
+        if p.context.shared.ref is self:
             share = None
-        elif context.istaken == 'glfw':
-            share = context.backend_canvas._id
         else:
-            raise RuntimeError('Different backends cannot share a context.')
-        
+            share = p.context.shared.ref._id
+
         glfw.glfwWindowHint(glfw.GLFW_REFRESH_RATE, 0)  # highest possible
-        glfw.glfwSwapInterval(1 if vsync else 0)
-        glfw.glfwWindowHint(glfw.GLFW_RESIZABLE, int(resize))
-        glfw.glfwWindowHint(glfw.GLFW_DECORATED, int(dec))
+        glfw.glfwSwapInterval(1 if p.vsync else 0)
+        glfw.glfwWindowHint(glfw.GLFW_RESIZABLE, int(p.resizable))
+        glfw.glfwWindowHint(glfw.GLFW_DECORATED, int(p.decorate))
         glfw.glfwWindowHint(glfw.GLFW_VISIBLE, 0)  # start out hidden
-        if fs is not False:
+        glfw.glfwWindowHint(glfw.GLFW_FLOATING, int(p.always_on_top))
+        if p.fullscreen is not False:
             self._fullscreen = True
-            if fs is True:
+            if p.fullscreen is True:
                 monitor = glfw.glfwGetPrimaryMonitor()
             else:
                 monitor = glfw.glfwGetMonitors()
-                if fs >= len(monitor):
+                if p.fullscreen >= len(monitor):
                     raise ValueError('fullscreen must be <= %s'
                                      % len(monitor))
-                monitor = monitor[fs]
+                monitor = monitor[p.fullscreen]
             use_size = glfw.glfwGetVideoMode(monitor)[:2]
-            if use_size != size:
-                logger.warning('Requested size %s, will be ignored to '
-                               'use fullscreen mode %s' % (size, use_size))
+            if use_size != tuple(p.size):
+                logger.debug('Requested size %s, will be ignored to '
+                             'use fullscreen mode %s' % (p.size, use_size))
             size = use_size
         else:
             self._fullscreen = False
             monitor = None
+            size = p.size
 
         self._id = glfw.glfwCreateWindow(width=size[0], height=size[1],
-                                         title=title, monitor=monitor,
+                                         title=p.title, monitor=monitor,
                                          share=share)
         if not self._id:
             raise RuntimeError('Could not create window')
-        
+
         _VP_GLFW_ALL_WINDOWS.append(self)
         self._mod = list()
 
         # Register callbacks
         glfw.glfwSetWindowRefreshCallback(self._id, self._on_draw)
-        glfw.glfwSetFramebufferSizeCallback(self._id, self._on_resize)
+        glfw.glfwSetWindowSizeCallback(self._id, self._on_resize)
         glfw.glfwSetKeyCallback(self._id, self._on_key_press)
         glfw.glfwSetMouseButtonCallback(self._id, self._on_mouse_button)
         glfw.glfwSetScrollCallback(self._id, self._on_mouse_scroll)
@@ -264,29 +287,28 @@ class CanvasBackend(BaseCanvasBackend):
         glfw.glfwSetWindowCloseCallback(self._id, self._on_close)
         self._vispy_canvas_ = None
         self._needs_draw = False
-        self._vispy_set_current()
-        if position is not None:
-            self._vispy_set_position(*position)
-        if show:
+        self._vispy_canvas.set_current()
+        if p.position is not None:
+            self._vispy_set_position(*p.position)
+        if p.show:
             glfw.glfwShowWindow(self._id)
-        
+
         # Init
         self._initialized = True
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.initialize()
-    
+
     def _vispy_warmup(self):
         etime = time() + 0.25
         while time() < etime:
             sleep(0.01)
-            self._vispy_set_current()
+            self._vispy_canvas.set_current()
             self._vispy_canvas.app.process_events()
 
     def _vispy_set_current(self):
         if self._id is None:
             return
         # Make this the current context
-        self._vispy_context.set_current(False)  # Mark as current
         glfw.glfwMakeContextCurrent(self._id)
 
     def _vispy_swap_buffers(self):
@@ -341,11 +363,16 @@ class CanvasBackend(BaseCanvasBackend):
             # glfw.glfwSetWindowShouldClose()  # Does not really cause a close
             self._vispy_set_visible(False)
             self._id, id_ = None, self._id
-            glfw.glfwPollEvents()
             glfw.glfwDestroyWindow(id_)
             gc.collect()  # help ensure context gets destroyed
 
     def _vispy_get_size(self):
+        if self._id is None:
+            return
+        w, h = glfw.glfwGetWindowSize(self._id)
+        return w, h
+
+    def _vispy_get_physical_size(self):
         if self._id is None:
             return
         w, h = glfw.glfwGetFramebufferSize(self._id)
@@ -365,7 +392,8 @@ class CanvasBackend(BaseCanvasBackend):
     def _on_resize(self, _id, w, h):
         if self._vispy_canvas is None:
             return
-        self._vispy_canvas.events.resize(size=(w, h))
+        self._vispy_canvas.events.resize(
+            size=(w, h), physical_size=self._vispy_get_physical_size())
 
     def _on_close(self, _id):
         if self._vispy_canvas is None:
@@ -375,7 +403,7 @@ class CanvasBackend(BaseCanvasBackend):
     def _on_draw(self, _id=None):
         if self._vispy_canvas is None or self._id is None:
             return
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.draw(region=None)  # (0, 0, w, h))
 
     def _on_mouse_button(self, _id, button, action, mod):
@@ -422,10 +450,10 @@ class CanvasBackend(BaseCanvasBackend):
         fun(key=key, text=text, modifiers=self._mod)
 
     def _process_key(self, key):
-        if key in KEYMAP:
-            return KEYMAP[key], ''
-        elif 32 <= key <= 127:
+        if 32 <= key <= 127:
             return keys.Key(chr(key)), chr(key)
+        elif key in KEYMAP:
+            return KEYMAP[key], ''
         else:
             return None, ''
 

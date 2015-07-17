@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 from __future__ import division
 
 import numpy as np
 
-from ..visuals.visual import Visual
-from ..visuals.line import Line
-from ..transforms import STTransform
+from ..node import Node
+from ...visuals.mesh import MeshVisual
+from ...visuals.transforms import STTransform
 from ...util.event import Event
 from ...geometry import Rect
 from ...color import Color
 
 
-class Widget(Visual):
+class Widget(Node):
     """ A widget takes up a rectangular space, intended for use in
     a 2D pixel coordinate frame.
 
     The widget is positioned using the transform attribute (as any
-    entity), and its extent (size) is kept as a separate property.
-    
+    node), and its extent (size) is kept as a separate property.
+
     Parameters
     ----------
     pos : (x, y)
@@ -29,6 +29,8 @@ class Widget(Visual):
         A 2-element tuple to spicify the size of the widget.
     border_color : color
         The color of the border.
+    bgcolor : color
+        The background color.
     clip : bool
         Not used :)
     padding : int
@@ -36,24 +38,30 @@ class Widget(Visual):
         the contents and the border).
     margin : int
         The margin to keep outside the widget's border.
-    
     """
 
-    def __init__(self, pos=(0, 0), size=(10, 10), border_color='black',
-                 clip=False, padding=0, margin=0, **kwargs):
-        Visual.__init__(self, **kwargs)
-        
-        # todo: rename to bordercolor? -> borderwidth
-        self._border_color = tuple(Color(border_color).rgba)
-        # for drawing border
-        self._visual = Line(color=self._border_color, mode='gl')
+    def __init__(self, pos=(0, 0), size=(10, 10), border_color=None,
+                 bgcolor=None, clip=False, padding=0, margin=0, **kwargs):
+        Node.__init__(self, **kwargs)
+
+        # For drawing border.
+        # A mesh is required because GL lines cannot be drawn with predictable
+        # shape across all platforms.
+        self._border_color = self._bgcolor = Color(None)
+        self._face_colors = None
+        self._visual = MeshVisual(mode='triangles')
+        self._visual.set_gl_state('translucent', depth_test=False)
+
         # whether this widget should clip its children
+        # (todo)
         self._clip = clip
+
         # reserved space inside border
         self._padding = padding
+
         # reserved space outside border
         self._margin = margin
-        
+
         self.events.add(resize=Event)
         self._size = 16, 16
         self.transform = STTransform()
@@ -62,6 +70,8 @@ class Widget(Visual):
         self._widgets = []
         self.pos = pos
         self.size = size
+        self.border_color = border_color
+        self.bgcolor = bgcolor
 
     @property
     def pos(self):
@@ -108,6 +118,18 @@ class Widget(Visual):
         self.events.resize()
 
     @property
+    def inner_rect(self):
+        """The rectangular area inside the margin, border and padding.
+
+        Generally widgets should avoid drawing or placing widgets outside this
+        rectangle.
+        """
+        m = self.margin + self.padding
+        if not self.border_color.is_blank:
+            m += 1
+        return Rect((m, m), (self.size[0]-2*m, self.size[1]-2*m))
+
+    @property
     def border_color(self):
         """ The color of the border.
         """
@@ -115,8 +137,9 @@ class Widget(Visual):
 
     @border_color.setter
     def border_color(self, b):
-        self._border_color = b
-        self._visual.set_data(color=b)
+        self._border_color = Color(b)
+        self._update_colors()
+        self._update_line()
         self.update()
 
     @property
@@ -128,6 +151,8 @@ class Widget(Visual):
     @bgcolor.setter
     def bgcolor(self, value):
         self._bgcolor = Color(value)
+        self._update_colors()
+        self._update_line()
         self.update()
 
     @property
@@ -146,29 +171,78 @@ class Widget(Visual):
     @padding.setter
     def padding(self, p):
         self._padding = p
-        self._update_child_boxes()
+        self._update_child_widgets()
 
     def _update_line(self):
         """ Update border line to match new shape """
-        if self.border_color is None:
-            return
-        m = self.margin
-        r = self.size[0] - m
-        t = self.size[1] - m
-        
+        w = 1  # XXX Eventually this can be a parameter
+        m = int(self.margin)
+        # border is drawn within the boundaries of the widget:
+        #
+        #  size = (8, 7)  margin=2
+        #  internal rect = (3, 3, 2, 1)
+        #  ........
+        #  ........
+        #  ..BBBB..
+        #  ..B  B..
+        #  ..BBBB..
+        #  ........
+        #  ........
+        #
+        l = b = m
+        r = int(self.size[0]) - m
+        t = int(self.size[1]) - m
         pos = np.array([
-            [m, m],
-            [r, m],
-            [r, t],
-            [m, t],
-            [m, m]]).astype(np.float32)
-        self._visual.set_data(pos=pos)
+            [l, b], [l+w, b+w],
+            [r, b], [r-w, b+w],
+            [r, t], [r-w, t-w],
+            [l, t], [l+w, t-w],
+        ], dtype=np.float32)
+        faces = np.array([
+            [0, 2, 1],
+            [1, 2, 3],
+            [2, 4, 3],
+            [3, 5, 4],
+            [4, 5, 6],
+            [5, 7, 6],
+            [6, 0, 7],
+            [7, 0, 1],
+            [5, 3, 1],
+            [1, 5, 7],
+        ], dtype=np.int32)
+        start = 8 if self._border_color.is_blank else 0
+        stop = 8 if self._bgcolor.is_blank else 10
+        face_colors = None
+        if self._face_colors is not None:
+            face_colors = self._face_colors[start:stop]
+        self._visual.set_data(vertices=pos, faces=faces[start:stop],
+                              face_colors=face_colors)
+
+    def _update_colors(self):
+        self._face_colors = np.concatenate(
+            (np.tile(self.border_color.rgba, (8, 1)),
+             np.tile(self.bgcolor.rgba, (2, 1)))).astype(np.float32)
 
     def draw(self, event):
-        if self.border_color is not None:
-            self._visual.draw(event)
+        """Draw the widget borders
 
-    def on_resize(self, ev):
+        Parameters
+        ----------
+        event : instance of Event
+            The event containing the transforms.
+        """
+        if self.border_color.is_blank and self.bgcolor.is_blank:
+            return
+        self._visual.draw(event)
+
+    def on_resize(self, event):
+        """On resize handler
+
+        Parameters
+        ----------
+        event : instance of Event
+            The resize event.
+        """
         self._update_child_widgets()
 
     def _update_child_widgets(self):
@@ -179,36 +253,56 @@ class Widget(Visual):
 
     def add_widget(self, widget):
         """
-        Add a Widget as a managed child of this Widget. The child will be
+        Add a Widget as a managed child of this Widget.
+
+        The child will be
         automatically positioned and sized to fill the entire space inside
         this Widget (unless _update_child_widgets is redefined).
+
+        Parameters
+        ----------
+        widget : instance of Widget
+            The widget to add.
+
+        Returns
+        -------
+        widget : instance of Widget
+            The widget.
         """
         self._widgets.append(widget)
         widget.parent = self
         self._update_child_widgets()
         return widget
 
-    def add_grid(self, *args, **kwds):
+    def add_grid(self, *args, **kwargs):
         """
         Create a new Grid and add it as a child widget.
 
-        All arguments are given to add_widget().
+        All arguments are given to Grid().
         """
         from .grid import Grid
-        grid = Grid()
-        return self.add_widget(grid, *args, **kwds)
+        grid = Grid(*args, **kwargs)
+        return self.add_widget(grid)
 
-    def add_view(self, *args, **kwds):
+    def add_view(self, *args, **kwargs):
         """
         Create a new ViewBox and add it as a child widget.
 
-        All arguments are given to add_widget().
+        All arguments are given to ViewBox().
         """
         from .viewbox import ViewBox
-        view = ViewBox()
-        return self.add_widget(view, *args, **kwds)
+        view = ViewBox(*args, **kwargs)
+        return self.add_widget(view)
 
     def remove_widget(self, widget):
+        """
+        Remove a Widget as a managed child of this Widget.
+
+        Parameters
+        ----------
+        widget : instance of Widget
+            The widget to remove.
+        """
         self._widgets.remove(widget)
         widget.remove_parent(self)
         self._update_child_widgets()

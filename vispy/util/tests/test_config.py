@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
-from nose.tools import assert_raises, assert_equal, assert_true
 from os import path as op
 import os
 
 from vispy.util import (config, sys_info, _TempDir, set_data_dir, save_config,
                         load_data_file)
-from vispy.testing import assert_in, requires_application, run_tests_if_main
+from vispy.testing import (assert_in, requires_application, run_tests_if_main,
+                           assert_raises, assert_equal, assert_true)
 temp_dir = _TempDir()
 
 
@@ -19,8 +19,7 @@ def test_sys_info():
     assert_raises(IOError, sys_info, fname)  # no overwrite
     with open(fname, 'r') as fid:
         out = ''.join(fid.readlines())
-    # Note: 'GL version' only for non-GLUT
-    keys = ['Python', 'Backend', 'pyglet', 'Platform:']
+    keys = ['GL version', 'Python', 'Backend', 'pyglet', 'Platform:']
     for key in keys:
         assert_in(key, out)
     print(out)

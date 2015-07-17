@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 import numpy as np
-from nose.tools import assert_raises
 
 from vispy.io import read_png, load_data_file
 from vispy.testing import (has_matplotlib, requires_application,
-                           run_tests_if_main)
+                           run_tests_if_main, assert_raises)
 import vispy.mpl_plot as plt
 
 

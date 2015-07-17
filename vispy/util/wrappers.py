@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 """
 Some wrappers to avoid circular imports, or make certain calls easier.
-"""
 
-"""
 The idea of a 'global' vispy.use function is that although vispy.app
 and vispy.gloo.gl can be used independently, they are not complely
 independent for some configureation. E.g. when using real ES 2.0,
@@ -25,8 +23,7 @@ import inspect
 def use(app=None, gl=None):
     """ Set the usage options for vispy
 
-    Specify what app backend and GL backend to use. Also see
-    ``vispy.app.use_app()`` and ``vispy.gloo.gl.use_gl()``.
+    Specify what app backend and GL backend to use.
 
     Parameters
     ----------
@@ -39,21 +36,19 @@ def use(app=None, gl=None):
             * 'Glfw': use Glfw backend (successor of Glut). Widely available
               on Linux.
             * 'SDL2': use SDL v2 backend.
-            * 'Glut': use Glut backend. Widely available but limited.
-              Not recommended.
         Additional backends:
             * 'ipynb_vnc': render in the IPython notebook via a VNC approach
               (experimental)
     gl : str
         The gl backend to use (case insensitive). Options are:
-            * 'desktop': use Vispy's desktop OpenGL API.
-            * 'pyopengl': use PyOpenGL's desktop OpenGL API. Mostly for
+            * 'gl2': use Vispy's desktop OpenGL API.
+            * 'pyopengl2': use PyOpenGL's desktop OpenGL API. Mostly for
               testing.
-            * 'angle': (TO COME) use real OpenGL ES 2.0 on Windows via Angle.
+            * 'es2': (TO COME) use real OpenGL ES 2.0 on Windows via Angle.
               Availability of ES 2.0 is larger for Windows, since it relies
               on DirectX.
-            * If 'debug' is included in this argument, vispy will check for
-              errors after each gl command.
+            * 'gl+': use the full OpenGL functionality available on
+              your system (via PyOpenGL).
 
     Notes
     -----
@@ -68,6 +63,11 @@ def use(app=None, gl=None):
     that backend first. If this is unsuccessful, it will try the
     'default_backend' provided in the vispy config. If still not
     succesful, it will try each backend in a predetermined order.
+
+    See Also
+    --------
+    vispy.app.use_app
+    vispy.gloo.gl.use_gl
     """
     if app is None and gl is None:
         raise TypeError('Must specify at least one of "app" or "gl".')
@@ -78,12 +78,14 @@ def use(app=None, gl=None):
         gl = 'webgl'
 
     # Apply now
+    if gl:
+        import vispy.gloo
+        from vispy import config
+        config['gl_backend'] = gl
+        vispy.gloo.gl.use_gl(gl)
     if app:
         import vispy.app
         vispy.app.use_app(app)
-    if gl:
-        import vispy.gloo
-        vispy.gloo.gl.use_gl(gl)
 
 
 def run_subprocess(command, return_code=False, **kwargs):
@@ -119,13 +121,17 @@ def run_subprocess(command, return_code=False, **kwargs):
     use_kwargs.update(kwargs)
 
     p = subprocess.Popen(command, **use_kwargs)
-    stdout_, stderr = p.communicate()
-    stdout_ = stdout_.decode('utf-8') if stdout_ is not None else ''
-    stderr = stderr.decode('utf-8') if stderr is not None else ''
-    output = (stdout_, stderr)
+    output = p.communicate()
+    
+    # communicate() may return bytes, str, or None depending on the kwargs 
+    # passed to Popen(). Convert all to unicode str:
+    output = ['' if s is None else s for s in output]
+    output = [s.decode('utf-8') if isinstance(s, bytes) else s for s in output]
+    output = tuple(output)
+    
     if not return_code and p.returncode:
-        print(stdout_)
-        print(stderr)
+        print(output[0])
+        print(output[1])
         err_fun = subprocess.CalledProcessError.__init__
         if 'output' in inspect.getargspec(err_fun).args:
             raise subprocess.CalledProcessError(p.returncode, command, output)

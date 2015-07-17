@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """
@@ -44,6 +44,7 @@ capability = dict(  # things that can be set by the backend
     multi_window=True,
     scroll=True,
     parent=False,
+    always_on_top=False,
 )
 
 
@@ -79,13 +80,8 @@ else:
     except Exception as exp:
         available, testable, why_not, which = False, False, str(exp), None
     else:
-        # Check if not GLUT, because that is going to be too unstable
-        if 'glut' in _app.backend_module.__name__:
-            _msg = 'ipynb_vnc backend refuses to work with GLUT'
-            available, testable, why_not, which = False, False, _msg, None
-        else:
-            available, testable, why_not = True, False, None
-            which = _app.backend_module.which
+        available, testable, why_not = True, False, None
+        which = _app.backend_module.which
         print('              NOTE: this backend requires the Chromium browser')
     # Use that backend's shared context
     KEYMAP = _app.backend_module.KEYMAP
@@ -158,15 +154,6 @@ class CanvasBackend(BaseCanvasBackend):
         # Create IPython Widget
         self._widget = Widget(self._gen_event, size=canvas.size)
 
-    @property
-    def _vispy_context(self):
-        """Context to return for sharing"""
-        return self._backend2._vispy_context
-    
-    @_vispy_context.setter
-    def _vispy_context(self, context):
-        self._backend2._vispy_context = context
-    
     def _vispy_warmup(self):
         return self._backend2._vispy_warmup()
 
@@ -241,7 +228,7 @@ class CanvasBackend(BaseCanvasBackend):
         self._backend2._vispy_set_visible(False)
 
         # Normal behavior
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.draw(region=None)
         # Save the encoded screenshot image to widget
         self._save_screenshot()

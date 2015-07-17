@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 30
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
@@ -10,9 +10,8 @@ Demonstration of various features of Line visual.
 import sys
 import numpy as np
 
-import vispy.app
-from vispy.scene import visuals
-from vispy.scene.transforms import STTransform
+from vispy import app, gloo, visuals
+from vispy.visuals.transforms import STTransform, NullTransform
 
 # vertex positions of data to draw
 N = 200
@@ -32,42 +31,65 @@ connect[:, 1] = connect[:, 0] + 1
 connect[N/2, 1] = N/2  # put a break in the middle
 
 
-class Canvas(vispy.scene.SceneCanvas):
+class Canvas(app.Canvas):
     def __init__(self):
-        vispy.scene.SceneCanvas.__init__(self, keys='interactive',
-                                         size=(800, 800), show=True)
+        app.Canvas.__init__(self, keys='interactive',
+                            size=(800, 800))
         # Create several visuals demonstrating different features of Line
         self.lines = [
-            # agg-mode lines:
-            visuals.Line(pos=pos, color=color, mode='agg'),  # per-vertex color
-            visuals.Line(pos=pos, color=(0, 0.5, 0.3, 1), mode='agg'),  # solid
-            visuals.Line(pos=pos, color=color, width=5, mode='agg'),  # wide
-            # GL-mode lines:
-            visuals.Line(pos=pos, color=color, mode='gl'),
-            visuals.Line(pos=pos, color=(0, 0.5, 0.3, 1), mode='gl'),
-            visuals.Line(pos=pos, color=color, width=5, mode='gl'),
-            # GL-mode: "connect" not available in AGG mode yet
-            
-            visuals.Line(pos=pos, color=(0, 0.5, 0.3, 1), connect='segments',
-                         mode='gl'),  # only connect alternate vert pairs
-            visuals.Line(pos=pos, color=(0, 0.5, 0.3, 1), connect=connect,
-                         mode='gl'),  # connect specific pairs
+            # agg-method lines:
+            # per-vertex color
+            visuals.LineVisual(pos=pos, color=color, method='agg'),
+            # solid
+            visuals.LineVisual(pos=pos, color=(0, 0.5, 0.3, 1), method='agg'),
+            # wide
+            visuals.LineVisual(pos=pos, color=color, width=5, method='agg'),
+
+            # GL-method lines:
+            visuals.LineVisual(pos=pos, color=color, method='gl'),
+            visuals.LineVisual(pos=pos, color=(0, 0.5, 0.3, 1), method='gl'),
+            visuals.LineVisual(pos=pos, color=color, width=5, method='gl'),
+            # GL-method: "connect" not available in AGG method yet
+
+            # only connect alternate vert pairs
+            visuals.LineVisual(pos=pos, color=(0, 0.5, 0.3, 1),
+                               connect='segments', method='gl'),
+            # connect specific pairs
+            visuals.LineVisual(pos=pos, color=(0, 0.5, 0.3, 1),
+                               connect=connect, method='gl'),
         ]
         counts = [0, 0]
         for i, line in enumerate(self.lines):
             # arrange lines in a grid
-            tidx = (line.mode == 'agg')
+            tidx = (line.method == 'agg')
             x = 400 * tidx
             y = 140 * (counts[tidx] + 1)
             counts[tidx] += 1
             line.transform = STTransform(translate=[x, y])
             # redraw the canvas if any visuals request an update
             line.events.update.connect(lambda evt: self.update())
-            line.parent = self.central_widget
-        self.texts = [visuals.Text('GL', bold=True, font_size=24, color='w',
-                                   pos=(200, 40), parent=self.central_widget),
-                      visuals.Text('Agg', bold=True, font_size=24, color='w',
-                                   pos=(600, 40), parent=self.central_widget)]
+
+        self.texts = [visuals.TextVisual('GL', bold=True, font_size=24,
+                                         color='w', pos=(200, 40)),
+                      visuals.TextVisual('Agg', bold=True, font_size=24,
+                                         color='w', pos=(600, 40))]
+        for text in self.texts:
+            text.transform = NullTransform()
+        self.visuals = self.lines + self.texts
+
+        # create a TransformSystem for each visual.
+        # (these are stored as attributes of each visual for convenience)
+        for visual in self.visuals:
+            visual.tr_sys = visuals.transforms.TransformSystem(self)
+            visual.tr_sys.visual_to_document = visual.transform
+
+        self.show()
+
+    def on_draw(self, event):
+        gloo.clear('black')
+        gloo.set_viewport(0, 0, *self.physical_size)
+        for visual in self.visuals:
+            visual.draw(visual.tr_sys)
 
 
 if __name__ == '__main__':
@@ -78,9 +100,9 @@ if __name__ == '__main__':
         win.lines[0].set_data(pos)
         win.lines[3].set_data(pos)
 
-    timer = vispy.app.Timer()
+    timer = app.Timer()
     timer.connect(update)
     timer.start(0)
 
     if sys.flags.interactive != 1:
-        vispy.app.run()
+        app.run()

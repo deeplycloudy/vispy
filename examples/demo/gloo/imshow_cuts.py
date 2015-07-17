@@ -111,6 +111,8 @@ void main()
 
 class Canvas(app.Canvas):
     def __init__(self):
+        app.Canvas.__init__(self, size=(512, 512),
+                            keys='interactive')
 
         self.image = Program(image_vertex, image_fragment, 4)
         self.image['position'] = (-1, -1), (-1, +1), (+1, -1), (+1, +1)
@@ -120,26 +122,27 @@ class Canvas(app.Canvas):
         self.image['cmap'] = 0  # Colormap index to use
         self.image['colormaps'] = colormaps
         self.image['n_colormaps'] = colormaps.shape[0]
-        self.image['image'] = I
+        self.image['image'] = I.astype('float32')
         self.image['image'].interpolation = 'linear'
 
-        self.lines = Program(lines_vertex, lines_fragment, 4+4+514+514)
-        self.lines["position"] = np.zeros((4+4+514+514, 2))
-        color = np.zeros((4+4+514+514, 4))
+        set_viewport(0, 0, *self.physical_size)
+
+        self.lines = Program(lines_vertex, lines_fragment)
+        self.lines["position"] = np.zeros((4+4+514+514, 2), np.float32)
+        color = np.zeros((4+4+514+514, 4), np.float32)
         color[1:1+2, 3] = 0.25
         color[5:5+2, 3] = 0.25
         color[9:9+512, 3] = 0.5
         color[523:523+512, 3] = 0.5
         self.lines["color"] = color
-        app.Canvas.__init__(self, show=True, size=(512, 512),
-                            keys='interactive')
 
-    def on_initialize(self, event):
         set_state(clear_color='white', blend=True,
                   blend_func=('src_alpha', 'one_minus_src_alpha'))
 
+        self.show()
+
     def on_resize(self, event):
-        set_viewport(0, 0, *event.size)
+        set_viewport(0, 0, *event.physical_size)
 
     def on_draw(self, event):
         clear(color=True, depth=True)
@@ -149,8 +152,17 @@ class Canvas(app.Canvas):
     def on_mouse_move(self, event):
         x, y = event.pos
         w, h = self.size
+
+        # Make sure the mouse isn't outside of the viewport.
+        x = max(0, min(x, w - 1))
+        y = max(0, min(y, h - 1))
+
         yf = 1 - y/(h/2.)
         xf = x/(w/2.) - 1
+
+        x_norm = (x*512)//w
+        y_norm = (y*512)//h
+
         P = np.zeros((4+4+514+514, 2), np.float32)
 
         x_baseline = P[:4]
@@ -162,11 +174,11 @@ class Canvas(app.Canvas):
         y_baseline[...] = (xf, -1), (xf, -1), (xf, 1), (xf, 1)
 
         x_profile[1:-1, 0] = np.linspace(-1, 1, 512)
-        x_profile[1:-1, 1] = yf+0.15*I[y]
+        x_profile[1:-1, 1] = yf+0.15*I[y_norm, :]
         x_profile[0] = x_profile[1]
         x_profile[-1] = x_profile[-2]
 
-        y_profile[1:-1, 0] = xf+0.15*I[:, x]
+        y_profile[1:-1, 0] = xf+0.15*I[:, x_norm]
         y_profile[1:-1, 1] = np.linspace(-1, 1, 512)
         y_profile[0] = y_profile[1]
         y_profile[-1] = y_profile[-2]

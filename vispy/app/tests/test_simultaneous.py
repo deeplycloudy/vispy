@@ -2,7 +2,6 @@
 
 import numpy as np
 from numpy.testing import assert_allclose
-from nose.tools import assert_true
 from time import sleep
 
 from vispy.app import use_app, Canvas, Timer
@@ -45,8 +44,6 @@ def test_multiple_canvases():
     """Testing multiple canvases"""
     n_check = 3
     app = use_app()
-    if app.backend_name.lower() == 'glut':
-        raise SkipTest('glut cannot use multiple canvases')
     with Canvas(app=app, size=_win_size, title='same_0') as c0:
         with Canvas(app=app, size=_win_size, title='same_1') as c1:
             ct = [0, 0]
@@ -70,8 +67,8 @@ def test_multiple_canvases():
             while (ct[0] < n_check or ct[1] < n_check) and time() < timeout:
                 app.process_events()
             print((ct, n_check))
-            assert_true(n_check <= ct[0] <= n_check + 1)
-            assert_true(n_check <= ct[1] <= n_check + 1)
+            assert n_check <= ct[0] <= n_check + 2  # be a bit lenient
+            assert n_check <= ct[1] <= n_check + 2
 
             # check timer
             global timer_ran
@@ -80,12 +77,13 @@ def test_multiple_canvases():
             def on_timer(_):
                 global timer_ran
                 timer_ran = True
-            timeout = time() + 2.0
-            Timer(0.1, app=app, connect=on_timer, iterations=1,
-                  start=True)
-            while not timer_ran and time() < timeout:
-                app.process_events()
-            assert_true(timer_ran)
+            t = Timer(0.1, app=app, connect=on_timer, iterations=1,  # noqa
+                      start=True)
+            app.process_events()
+            sleep(0.5)  # long for slow systems
+            app.process_events()
+            app.process_events()
+            assert timer_ran
 
     if app.backend_name.lower() == 'wx':
         raise SkipTest('wx fails test #2')  # XXX TODO Fix this

@@ -12,18 +12,15 @@ and each quadrant is drawn a different color (black, red, green,
 blue). The drawing is done for 50% using attribute data, and 50%
 using a texture. The end result should be fully saturated colors.
 
-Remember: the bottom left is (-1, -1) and the first quadrant. 
-
+Remember: the bottom left is (-1, -1) and the first quadrant.
 """
 import sys
 
 import numpy as np
 
-from nose.tools import assert_equal, assert_true
 from vispy.app import Canvas
-from numpy.testing import assert_almost_equal  # noqa
 from vispy.testing import (requires_application, requires_pyopengl, SkipTest,
-                           glut_skip, run_tests_if_main)
+                           run_tests_if_main, assert_equal, assert_true)
 
 from vispy.gloo import gl
 
@@ -39,35 +36,31 @@ def teardown_module():
 @requires_application()
 def test_functionality_desktop():
     """ Test desktop GL backend for full functionality. """
-    glut_skip()
-    _test_functonality('desktop')
+    _test_functionality('gl2')
 
 
 @requires_application()
 def test_functionality_proxy():
     """ Test GL proxy class for full functionality. """
     # By using debug mode, we are using the proxy class
-    glut_skip()
-    _test_functonality('desktop debug')
+    _test_functionality('gl2 debug')
 
 
 @requires_application()
 @requires_pyopengl()
 def test_functionality_pyopengl():
     """ Test pyopengl GL backend for full functionality. """
-    glut_skip()
-    _test_functonality('pyopengl')
+    _test_functionality('pyopengl2')
 
 
 @requires_application()
-def test_functionality_angle():
-    """ Test angle GL backend for full functionality. """
+def test_functionality_es2():
+    """ Test es2 GL backend for full functionality. """
     if True:
-        raise SkipTest('Skip Angle functionality test for now.')
-    if sys.platform.startswith('win'):
-        raise SkipTest('Can only test angle functionality on Windows.')
-    glut_skip()
-    _test_functonality('angle')
+        raise SkipTest('Skip es2 functionality test for now.')
+    if not sys.platform.startswith('win'):
+        raise SkipTest('Can only test es2 functionality on Windows.')
+    _test_functionality('es2')
 
 
 def _clear_screen():
@@ -75,7 +68,7 @@ def _clear_screen():
     gl.glFinish()
 
 
-def _test_functonality(backend):
+def _test_functionality(backend):
     """ Create app and canvas so we have a context. Then run tests.
     """
     # use the backend
@@ -209,7 +202,6 @@ helements = None  # the OpenGL object ref
 
 ## The GL calls
 
-
 def _prepare_vis():
     
     objects = []
@@ -225,8 +217,8 @@ def _prepare_vis():
     objects.append((gl.glDeleteShader, hfrag))
     
     # Compile source code
-    gl.glShaderSource_compat(hvert, VERT)
-    gl.glShaderSource_compat(hfrag, FRAG)
+    gl.glShaderSource(hvert, VERT)
+    gl.glShaderSource(hfrag, FRAG)
     gl.glCompileShader(hvert)
     gl.glCompileShader(hfrag)
     
@@ -242,6 +234,15 @@ def _prepare_vis():
     # touch glDetachShader
     gl.glDetachShader(hprog, hvert)
     gl.glAttachShader(hprog, hvert)
+
+    # Bind all attributes - we could let this occur automatically, but some
+    # implementations bind an attribute to index 0, which has the unfortunate
+    # property of being unable to be modified.
+    gl.glBindAttribLocation(hprog, 1, 'a_1')
+    gl.glBindAttribLocation(hprog, 2, 'a_2')
+    gl.glBindAttribLocation(hprog, 3, 'a_3')
+    gl.glBindAttribLocation(hprog, 4, 'a_4')
+
     gl.glLinkProgram(hprog)
     
     # Test that indeed these shaders are attached
@@ -257,9 +258,6 @@ def _prepare_vis():
     # Use it!
     gl.glUseProgram(hprog)
     
-    # Bind one attribute
-    gl.glBindAttribLocation(hprog, 1, 'a_2')
-    
     # Check if all is ok
     assert_equal(gl.glGetError(), 0)
     
@@ -269,7 +267,7 @@ def _prepare_vis():
     
     # --- get information on attributes and uniforms
     
-    # Count attribbutes and uniforms
+    # Count attributes and uniforms
     natt = gl.glGetProgramParameter(hprog, gl.GL_ACTIVE_ATTRIBUTES)
     nuni = gl.glGetProgramParameter(hprog, gl.GL_ACTIVE_UNIFORMS)
     assert_equal(natt, 4)

@@ -34,11 +34,13 @@ Announcing:
 
 import os
 from os import path as op
+from warnings import warn
 
 try:
     # use setuptools namespace, allows for "develop"
     import setuptools  # noqa, analysis:ignore
 except ImportError:
+    warn("unable to load setuptools. 'setup.py develop' will not work")
     pass  # it's not essential for installation
 from distutils.core import setup
 
@@ -87,13 +89,37 @@ setup(
     platforms='any',
     provides=['vispy'],
     install_requires=['numpy'],
+    extras_require={
+        'ipython-static': ['ipython'],
+        'ipython-vnc': ['ipython>=2'],
+        'ipython-webgl': ['ipython>=2', 'tornado'],
+        'pyglet': ['pyglet>=1.2'],
+        # 'pyqt4': [],  # Why is this on PyPI, but without downloads?
+        # 'pyqt5': [],  # Ditto.
+        'pyside': ['PySide'],
+        'sdl2': ['PySDL2'],
+        'wx': ['wxPython'],
+    },
     packages=package_tree('vispy'),
     package_dir={
         'vispy': 'vispy'},
     package_data={
         'vispy': [op.join('io', '_data', '*'),
                   op.join('html', 'static', 'js', '*'),
-                  op.join('app', 'tests', 'qt-designer.ui')]},
+                  op.join('app', 'tests', 'qt-designer.ui')
+                  ],
+
+        'vispy.glsl': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.antialias': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.arrows': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.collections': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.colormaps': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.markers': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.math': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.misc': ['*.vert','*.frag', "*.glsl"],
+        'vispy.glsl.transforms': ['*.vert','*.frag', "*.glsl"],
+
+                  },
     zip_safe=False,
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -108,7 +134,8 @@ setup(
         'Programming Language :: Python',
         'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
+        'Framework :: IPython'
     ],
 )

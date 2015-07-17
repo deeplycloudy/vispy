@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 30
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author: John David Reaver
@@ -194,21 +194,23 @@ class Canvas(app.Canvas):
         self.translate_center(0, 0)
         self.iterations = self.program["iter"] = 300
 
-        width, height = self.size
-        self.program['inv_resolution_x'] = set_emulated_double(1 / width)
-        self.program['inv_resolution_y'] = set_emulated_double(1 / height)
+        self.apply_zoom()
 
         self.min_scale = 1e-12
         self.max_scale = 4
 
-    def on_initialize(self, event):
         gloo.set_clear_color(color='black')
+
+        self.show()
 
     def on_draw(self, event):
         self.program.draw()
 
     def on_resize(self, event):
-        width, height = event.size
+        self.apply_zoom()
+
+    def apply_zoom(self):
+        width, height = self.physical_size
         gloo.set_viewport(0, 0, width, height)
         self.program['inv_resolution_x'] = set_emulated_double(1 / width)
         self.program['inv_resolution_y'] = set_emulated_double(1 / height)
@@ -262,7 +264,7 @@ class Canvas(app.Canvas):
         wheels :)
 
         """
-        if event.text == '+':
+        if event.text == '+' or event.text == '=':
             self.zoom(0.9)
         elif event.text == '-':
             self.zoom(1/0.9)
@@ -275,7 +277,7 @@ class Canvas(app.Canvas):
         while zooming. mouse_coords should come from MouseEvent.pos.
 
         """
-        if mouse_coords:  # Record the position of the mouse
+        if mouse_coords is not None:  # Record the position of the mouse
             x, y = float(mouse_coords[0]), float(mouse_coords[1])
             x0, y0 = self.pixel_to_coords(x, y)
 
@@ -283,7 +285,7 @@ class Canvas(app.Canvas):
         self.scale = max(min(self.scale, self.max_scale), self.min_scale)
         self.program["scale"] = set_emulated_double(self.scale)
 
-        if mouse_coords:  # Translate so the mouse point is stationary
+        if mouse_coords is not None:  # Translate so mouse point is stationary
             x1, y1 = self.pixel_to_coords(x, y)
             self.translate_center(x1 - x0, y1 - y0)
 
@@ -297,5 +299,4 @@ def set_emulated_double(number):
 
 if __name__ == '__main__':
     canvas = Canvas(size=(800, 800), keys='interactive')
-    canvas.show()
     app.run()

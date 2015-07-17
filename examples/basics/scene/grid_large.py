@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-# vispy: gallery 2
+# vispy: testskip  # disabled due to segfaults on travis
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
 Test automatic layout of multiple viewboxes using Grid.
 """
 
+import sys
 from vispy import scene
 from vispy import app
 import numpy as np
@@ -25,16 +26,16 @@ for i in range(10):
     lines.append([])
     for j in range(10):
         vb = grid.add_view(row=i, col=j)
+        vb.camera = 'panzoom'
         vb.camera.rect = (0, -5), (100, 10)
         vb.border = (1, 1, 1, 0.4)
 
         pos = np.empty((N, 2), dtype=np.float32)
         pos[:, 0] = np.linspace(0, 100, N)
         pos[:, 1] = np.random.normal(size=N)
-        line = scene.visuals.Line(pos=pos, color=(1, 1, 1, 0.5), mode='gl')
+        line = scene.visuals.Line(pos=pos, color=(1, 1, 1, 0.5), method='gl')
         vb.add(line)
 
 
-import sys
 if __name__ == '__main__' and sys.flags.interactive == 0:
     app.run()

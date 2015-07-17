@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 """
@@ -16,6 +16,9 @@ from ..base import (BaseApplicationBackend, BaseCanvasBackend,
                     BaseTimerBackend)
 from ...util import keys, logger
 from ...util.ptime import time
+from ... import config
+
+USE_EGL = config['gl_backend'].lower().startswith('es')
 
 
 # -------------------------------------------------------------------- init ---
@@ -24,7 +27,8 @@ try:
     # avoid silly locale warning on OSX
     with warnings.catch_warnings(record=True):
         import wx
-        from wx import Frame, glcanvas
+        from wx import glcanvas
+        from wx.glcanvas import GLCanvas
 
     # Map native keys to vispy keys
     KEYMAP = {
@@ -71,9 +75,11 @@ except Exception as exp:
 
     class GLCanvas(object):
         pass
-    Frame = GLCanvas
 else:
-    available, testable, why_not = True, True, None
+    if USE_EGL:
+        available, testable, why_not = False, False, 'EGL not supported'
+    else:
+        available, testable, why_not = True, True, None
     which = 'wxPython ' + str(wx.__version__)
 
 
@@ -92,6 +98,7 @@ capability = dict(  # things that can be set by the backend
     multi_window=True,
     scroll=True,
     parent=True,
+    always_on_top=True,
 )
 
 
@@ -189,61 +196,71 @@ class DummySize(object):
         pass
 
 
-class CanvasBackend(Frame, BaseCanvasBackend):
+class CanvasBackend(GLCanvas, BaseCanvasBackend):
 
     """ wxPython backend for Canvas abstract class."""
 
     # args are for BaseCanvasBackend, kwargs are for us.
     def __init__(self, *args, **kwargs):
         BaseCanvasBackend.__init__(self, *args)
-        title, size, position, show, vsync, resize, dec, fs, parent, context, \
-            = self._process_backend_kwargs(kwargs)
-        
-        # Deal with context 
-        if not context.istaken:
-            context.take('wx', self)
-            self._gl_attribs = _set_config(context.config)
-            self._gl_context = None  # set for real once we know self._canvas
-        elif context.istaken == 'wx':
-            self._gl_attribs = context.backend_canvas._gl_attribs
-            self._gl_context = context.backend_canvas._gl_context
+        p = self._process_backend_kwargs(kwargs)
+
+        # WX supports OS double-click events, so we set this here to
+        # avoid double events
+        self._double_click_supported = True
+
+        # Set config
+        self._gl_attribs = _set_config(p.context.config)
+        # Deal with context
+        p.context.shared.add_ref('wx', self)
+        if p.context.shared.ref is self:
+            self._gl_context = None  # set for real once we init the GLCanvas
         else:
-            raise RuntimeError('Different backends cannot share a context.')
-        
-        style = (wx.MINIMIZE_BOX | wx.MAXIMIZE_BOX | wx.CLOSE_BOX |
-                 wx.SYSTEM_MENU | wx.CAPTION | wx.CLIP_CHILDREN)
-        style |= wx.NO_BORDER if not dec else wx.RESIZE_BORDER
-        self._init = False
-        Frame.__init__(self, parent, wx.ID_ANY, title, position, size, style)
-        if not resize:
-            self.SetSizeHints(size[0], size[1], size[0], size[1])
-        if fs is not False:
-            if fs is not True:
-                logger.warning('Cannot specify monitor number for wx '
-                               'fullscreen, using default')
-            self._fullscreen = True
+            self._gl_context = p.context.shared.ref._gl_context
+
+        if p.parent is None:
+            style = (wx.MINIMIZE_BOX | wx.MAXIMIZE_BOX | wx.CLOSE_BOX |
+                     wx.SYSTEM_MENU | wx.CAPTION | wx.CLIP_CHILDREN)
+            style |= wx.NO_BORDER if not p.decorate else wx.RESIZE_BORDER
+            style |= wx.STAY_ON_TOP if p.always_on_top else 0
+            self._frame = wx.Frame(None, wx.ID_ANY, p.title, p.position,
+                                   p.size, style)
+            if not p.resizable:
+                self._frame.SetSizeHints(p.size[0], p.size[1],
+                                         p.size[0], p.size[1])
+            if p.fullscreen is not False:
+                if p.fullscreen is not True:
+                    logger.warning('Cannot specify monitor number for wx '
+                                   'fullscreen, using default')
+                self._fullscreen = True
+            else:
+                self._fullscreen = False
+            _wx_app.SetTopWindow(self._frame)
+            parent = self._frame
+            self._frame.Raise()
+            self._frame.Bind(wx.EVT_CLOSE, self.on_close)
         else:
+            parent = p.parent
+            self._frame = None
             self._fullscreen = False
-        _wx_app.SetTopWindow(self)
-        
-        self._canvas = glcanvas.GLCanvas(self, wx.ID_ANY, wx.DefaultPosition,
-                                         wx.DefaultSize, 0, 'GLCanvas',
-                                         self._gl_attribs)
+        self._init = False
+        GLCanvas.__init__(self, parent, wx.ID_ANY, pos=p.position,
+                          size=p.size, style=0, name='GLCanvas',
+                          attribList=self._gl_attribs)
+
         if self._gl_context is None:
-            self._gl_context = glcanvas.GLContext(self._canvas)
-        
-        self._canvas.Raise()
-        self._canvas.SetFocus()
-        self._vispy_set_title(title)
+            self._gl_context = glcanvas.GLContext(self)
+
+        self.SetFocus()
+        self._vispy_set_title(p.title)
         self._size = None
         self.Bind(wx.EVT_SIZE, self.on_resize)
-        self._canvas.Bind(wx.EVT_PAINT, self.on_paint)
-        self._canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
-        self._canvas.Bind(wx.EVT_KEY_UP, self.on_key_up)
-        self._canvas.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse_event)
-        self.Bind(wx.EVT_CLOSE, self.on_close)
-        self._size_init = size
-        self._vispy_set_visible(show)
+        self.Bind(wx.EVT_PAINT, self.on_draw)
+        self.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
+        self.Bind(wx.EVT_KEY_UP, self.on_key_up)
+        self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse_event)
+        self._size_init = p.size
+        self._vispy_set_visible(p.show)
 
     def on_resize(self, event):
         if self._vispy_canvas is None or not self._init:
@@ -254,13 +271,13 @@ class CanvasBackend(Frame, BaseCanvasBackend):
         self.Refresh()
         event.Skip()
 
-    def on_paint(self, event):
-        if self._vispy_canvas is None or self._canvas is None:
+    def on_draw(self, event):
+        if self._vispy_canvas is None:
             return
         dc = wx.PaintDC(self)  # needed for wx
         if not self._init:
             self._initialize()
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.draw(region=None)
         del dc
         event.Skip()
@@ -269,33 +286,29 @@ class CanvasBackend(Frame, BaseCanvasBackend):
         if self._vispy_canvas is None:
             return
         self._init = True
-        self._vispy_set_current()
+        self._vispy_canvas.set_current()
         self._vispy_canvas.events.initialize()
         self.on_resize(DummySize(self._size_init))
 
     def _vispy_set_current(self):
-        if self._canvas is None:
-            return
-        self._vispy_context.set_current(False)  # Mark as current
-        self._canvas.SetCurrent(self._gl_context)
-    
+        self.SetCurrent(self._gl_context)
+
     def _vispy_warmup(self):
         etime = time() + 0.3
         while time() < etime:
             sleep(0.01)
-            self._vispy_set_current()
+            self._vispy_canvas.set_current()
             self._vispy_canvas.app.process_events()
 
     def _vispy_swap_buffers(self):
         # Swap front and back buffer
-        if self._canvas is None:
-            return
-        self._vispy_set_current()
-        self._canvas.SwapBuffers()
+        self._vispy_canvas.set_current()
+        self.SwapBuffers()
 
     def _vispy_set_title(self, title):
         # Set the window title. Has no effect for widgets
-        self.SetLabel(title)
+        if self._frame is not None:
+            self._frame.SetLabel(title)
 
     def _vispy_set_size(self, w, h):
         # Set size of the widget or window
@@ -305,57 +318,63 @@ class CanvasBackend(Frame, BaseCanvasBackend):
 
     def _vispy_set_position(self, x, y):
         # Set positionof the widget or window. May have no effect for widgets
-        self.SetPosition((x, y))
+        if self._frame is not None:
+            self._frame.SetPosition((x, y))
 
     def _vispy_get_fullscreen(self):
         return self._fullscreen
 
     def _vispy_set_fullscreen(self, fullscreen):
-        self._fullscreen = bool(fullscreen)
-        self._vispy_set_visible(True)
+        if self._frame is not None:
+            self._fullscreen = bool(fullscreen)
+            self._vispy_set_visible(True)
 
     def _vispy_set_visible(self, visible):
         # Show or hide the window or widget
         self.Show(visible)
         if visible:
-            self.ShowFullScreen(self._fullscreen)
+            if self._frame is not None:
+                self._frame.ShowFullScreen(self._fullscreen)
 
     def _vispy_update(self):
         # Invoke a redraw
         self.Refresh()
 
     def _vispy_close(self):
-        if self._vispy_canvas is None or self._canvas is None:
+        if self._vispy_canvas is None:
             return
         # Force the window or widget to shut down
-        canvas = self._canvas
-        self._canvas = None
+        canvas = self
+        frame = self._frame
         self._gl_context = None  # let RC destroy this in case it's shared
         canvas.Close()
         canvas.Destroy()
-        self.Close()
-        self.Destroy()
+        if frame:
+            frame.Close()
+            frame.Destroy()
         gc.collect()  # ensure context gets destroyed if it should be
 
     def _vispy_get_size(self):
-        if self._canvas is None or self._vispy_canvas is None:
+        if self._vispy_canvas is None:
             return
         w, h = self.GetClientSize()
         return w, h
 
     def _vispy_get_position(self):
-        if self._vispy_canvas is None or self._canvas is None:
+        if self._vispy_canvas is None:
             return
         x, y = self.GetPosition()
         return x, y
 
     def on_close(self, evt):
+        if not self:  # wx control evaluates to false if C++ part deleted
+            return
         if self._vispy_canvas is None:
             return
         self._vispy_canvas.close()
 
     def on_mouse_event(self, evt):
-        if self._vispy_canvas is None or self._canvas is None:
+        if self._vispy_canvas is None:
             return
         pos = (evt.GetX(), evt.GetY())
         mods = _get_mods(evt)
@@ -385,17 +404,29 @@ class CanvasBackend(Frame, BaseCanvasBackend):
             else:
                 evt.Skip()
             self._vispy_mouse_release(pos=pos, button=button, modifiers=mods)
+        elif evt.ButtonDClick():
+            if evt.LeftDClick():
+                button = 0
+            elif evt.MiddleDClick():
+                button = 1
+            elif evt.RightDClick():
+                button = 2
+            else:
+                evt.Skip()
+            self._vispy_mouse_press(pos=pos, button=button, modifiers=mods)
+            self._vispy_mouse_double_click(pos=pos, button=button,
+                                           modifiers=mods)
         evt.Skip()
 
     def on_key_down(self, evt):
-        if self._vispy_canvas is None or self._canvas is None:
+        if self._vispy_canvas is None:
             return
         key, text = _process_key(evt)
         self._vispy_canvas.events.key_press(key=key, text=text,
                                             modifiers=_get_mods(evt))
 
     def on_key_up(self, evt):
-        if self._vispy_canvas is None or self._canvas is None:
+        if self._vispy_canvas is None:
             return
         key, text = _process_key(evt)
         self._vispy_canvas.events.key_release(key=key, text=text,

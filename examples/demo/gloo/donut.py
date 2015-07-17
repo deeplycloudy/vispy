@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 30
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author: Nicolas P .Rougier
@@ -15,23 +15,6 @@ import numpy as np
 from vispy import gloo
 from vispy import app
 from vispy.util.transforms import perspective, translate, rotate
-
-# Create vertices
-n, p = 50, 40
-data = np.zeros(p * n, [('a_position', np.float32, 2),
-                        ('a_bg_color', np.float32, 4),
-                        ('a_fg_color', np.float32, 4),
-                        ('a_size',     np.float32, 1)])
-data['a_position'][:, 0] = np.resize(np.linspace(0, 2 * np.pi, n), p * n)
-data['a_position'][:, 1] = np.repeat(np.linspace(0, 2 * np.pi, p), n)
-data['a_bg_color'] = np.random.uniform(0.75, 1.00, (n * p, 4))
-data['a_bg_color'][:, 3] = 1
-data['a_fg_color'] = 0, 0, 0, 1
-data['a_size'] = np.random.uniform(8, 8, n * p)
-u_linewidth = 1.0
-u_antialias = 1.0
-u_size = 1
-
 
 vert = """
 #version 120
@@ -119,16 +102,33 @@ void main()
 class Canvas(app.Canvas):
 
     def __init__(self):
-        app.Canvas.__init__(self, keys='interactive')
-        self.size = 800, 800
-        self.title = "D'oh ! A big donut"
+        app.Canvas.__init__(self, keys='interactive', size=(800, 800))
+        ps = self.pixel_scale
 
+        self.title = "D'oh! A big donut"
+
+        # Create vertices
+        n, p = 50, 40
+        data = np.zeros(p * n, [('a_position', np.float32, 2),
+                                ('a_bg_color', np.float32, 4),
+                                ('a_fg_color', np.float32, 4),
+                                ('a_size',     np.float32, 1)])
+        data['a_position'][:, 0] = np.resize(np.linspace(
+                                             0, 2 * np.pi, n), p * n)
+        data['a_position'][:, 1] = np.repeat(np.linspace(0, 2 * np.pi, p), n)
+        data['a_bg_color'] = np.random.uniform(0.75, 1.00, (n * p, 4))
+        data['a_bg_color'][:, 3] = 1
+        data['a_fg_color'] = 0, 0, 0, 1
+        # data['a_size'] = np.random.uniform(8*ps, 8*ps, n * p)
+        data['a_size'] = 8.0*ps
+        u_linewidth = 1.0*ps
+        u_antialias = 1.0
+
+        self.translate = 5
         self.program = gloo.Program(vert, frag)
-        self.view = np.eye(4, dtype=np.float32)
+        self.view = translate((0, 0, -self.translate))
         self.model = np.eye(4, dtype=np.float32)
         self.projection = np.eye(4, dtype=np.float32)
-        self.translate = 5
-        translate(self.view, 0, 0, -self.translate)
 
         self.program.bind(gloo.VertexBuffer(data))
         self.program['u_linewidth'] = u_linewidth
@@ -137,15 +137,19 @@ class Canvas(app.Canvas):
         self.program['u_view'] = self.view
         self.program['u_size'] = 5 / self.translate
 
+        self.apply_zoom()
+
         self.theta = 0
         self.phi = 0
         self.clock = 0
         self.stop_rotation = False
 
+        gloo.set_state('translucent', clear_color='white')
+        self.program['u_clock'] = 0.0
+
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
 
-    def on_initialize(self, event):
-        gloo.set_state('translucent', clear_color='white')
+        self.show()
 
     def on_key_press(self, event):
         if event.text == ' ':
@@ -155,25 +159,20 @@ class Canvas(app.Canvas):
         if not self.stop_rotation:
             self.theta += .5
             self.phi += .5
-            self.model = np.eye(4, dtype=np.float32)
-            rotate(self.model, self.theta, 0, 0, 1)
-            rotate(self.model, self.phi, 0, 1, 0)
+            self.model = np.dot(rotate(self.theta, (0, 0, 1)),
+                                rotate(self.phi, (0, 1, 0)))
             self.program['u_model'] = self.model
         self.clock += np.pi / 1000
         self.program['u_clock'] = self.clock
         self.update()
 
     def on_resize(self, event):
-        width, height = event.size
-        gloo.set_viewport(0, 0, width, height)
-        self.projection = perspective(45.0, width / float(height), 1.0, 1000.0)
-        self.program['u_projection'] = self.projection
+        self.apply_zoom()
 
     def on_mouse_wheel(self, event):
-        self.translate += event.delta[1]
+        self.translate -= event.delta[1]
         self.translate = max(2, self.translate)
-        self.view = np.eye(4, dtype=np.float32)
-        translate(self.view, 0, 0, -self.translate)
+        self.view = translate((0, 0, -self.translate))
 
         self.program['u_view'] = self.view
         self.program['u_size'] = 5 / self.translate
@@ -183,8 +182,13 @@ class Canvas(app.Canvas):
         gloo.clear()
         self.program.draw('points')
 
+    def apply_zoom(self):
+        gloo.set_viewport(0, 0, self.physical_size[0], self.physical_size[1])
+        self.projection = perspective(45.0, self.size[0] /
+                                      float(self.size[1]), 1.0, 1000.0)
+        self.program['u_projection'] = self.projection
+
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     app.run()

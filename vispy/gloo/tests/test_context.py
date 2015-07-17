@@ -2,18 +2,29 @@
 
 import gc
 
-from nose.tools import assert_raises, assert_equal, assert_not_equal
-from vispy.testing import assert_in, run_tests_if_main
+from vispy.testing import (assert_in, run_tests_if_main, assert_raises,
+                           assert_equal, assert_not_equal)
 
-from vispy.gloo import (GLContext, get_current_context, 
-                        get_default_config)
+from vispy import gloo
+from vispy.gloo import (GLContext, get_default_config)
+
+
+class DummyCanvas(object):
+    
+    @property
+    def glir(self):
+        return self
+    
+    def command(self, *args):
+        pass
 
 
 class DummyCanvasBackend(object):
     
     def __init__(self):
         self.set_current = False
-    
+        self._vispy_canvas = DummyCanvas()
+        
     def _vispy_set_current(self):
         self.set_current = True
 
@@ -44,66 +55,68 @@ def test_context_config():
     # Passing crap should raise
     assert_raises(KeyError, GLContext, {'foo': 3})
     assert_raises(TypeError, GLContext, {'double_buffer': 'not_bool'})
-    
+
+    # Capabilites are passed on
+    assert 'gl_version' in c.capabilities
+
 
 def test_context_taking():
     """ Test GLContext ownership and taking
     """
     def get_canvas(c):
-        return c.backend_canvas
+        return c.shared.ref
     
     cb = DummyCanvasBackend()
     c = GLContext()
     
     # Context is not taken and cannot get backend_canvas
-    assert not c.istaken
+    assert c.shared.name is None
     assert_raises(RuntimeError, get_canvas, c)
-    assert_in('no backend', repr(c))
+    assert_in('None backend', repr(c.shared))
     
     # Take it
-    c.take('test-foo', cb)
-    assert c.backend_canvas is cb
-    assert_in('test-foo backend', repr(c))
+    c.shared.add_ref('test-foo', cb)
+    assert c.shared.ref is cb
+    assert_in('test-foo backend', repr(c.shared))
     
-    # Now we cannot take it again
-    assert_raises(RuntimeError, c.take, 'test', cb)
+    # Now we can take it again
+    c.shared.add_ref('test-foo', cb)
+    assert len(c.shared._refs) == 2
+    #assert_raises(RuntimeError, c.take, 'test', cb)
     
     # Canvas backend can delete (we use a weak ref)
     cb = DummyCanvasBackend()  # overwrite old object
     gc.collect()
     
-    # Still cannot take it, but backend is invalid
-    assert_raises(RuntimeError, c.take, 'test', cb)
+    # No more refs
     assert_raises(RuntimeError, get_canvas, c)
 
 
-def test_context_activating():
-    """ Test GLContext activation and obtaining current context
-    """
-    c1 = GLContext()
-    c2 = GLContext()
+def test_gloo_without_app():
+    """ Test gloo without vispy.app (with FakeCanvas) """
     
-    assert get_current_context() is None
+    # Create dummy parser
+    class DummyParser(gloo.glir.BaseGlirParser):
+        def __init__(self):
+            self.commands = []
+        
+        def parse(self, commands):
+            self.commands.extend(commands)
     
-    # Need backend to make current
-    assert_raises(RuntimeError, c1.set_current)
+    p = DummyParser()
     
-    # Unless we do this
-    c1.set_current(False)
-    assert get_current_context() is c1
+    # Create fake canvas and attach our parser
+    c = gloo.context.FakeCanvas()
+    c.context.shared.parser = p
     
-    # Switch
-    c2.set_current(False)
-    assert get_current_context() is c2
+    # Do some commands
+    gloo.clear()
+    c.flush()
+    gloo.clear()
+    c.flush()
     
-    # Now try with backend
-    cb1 = DummyCanvasBackend()
-    c1.take('test', cb1)
-    assert cb1.set_current is False
-    assert get_current_context() is c2
-    c1.set_current()
-    assert get_current_context() is c1
-    assert cb1.set_current is True
+    assert len(p.commands) in (2, 3)  # there may be a CURRENT command
+    assert p.commands[-1][1] == 'glClear'
 
 
 run_tests_if_main()

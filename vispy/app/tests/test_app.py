@@ -4,21 +4,20 @@ from collections import namedtuple
 from time import sleep
 
 from numpy.testing import assert_array_equal
-from nose.tools import assert_equal, assert_true, assert_raises
 
 from vispy.app import use_app, Canvas, Timer, MouseEvent, KeyEvent
 from vispy.app.base import BaseApplicationBackend
 from vispy.testing import (requires_application, SkipTest, assert_is,
-                           assert_in, run_tests_if_main)
+                           assert_in, run_tests_if_main,
+                           assert_equal, assert_true, assert_raises)
 from vispy.util import keys, use_log_level
 
 from vispy.gloo.program import (Program, VertexBuffer, IndexBuffer)
-from vispy.gloo.shader import VertexShader, FragmentShader
 from vispy.gloo.util import _screenshot
 from vispy.gloo import gl
 from vispy.ext.six.moves import StringIO
 
-gl.use_gl('desktop debug')
+gl.use_gl('gl2 debug')
 
 
 def on_nonexist(self, *args):
@@ -59,7 +58,7 @@ def _test_callbacks(canvas):
         backend._on_mouse_scroll(_id, 1, 0)
         backend._on_mouse_motion(_id, 10, 10)
         backend._on_close(_id)
-    elif 'qt' in backend_name.lower():
+    elif any(x in backend_name.lower() for x in ('qt', 'pyside')):
         # constructing fake Qt events is too hard :(
         pass
     elif 'sdl2' in backend_name.lower():
@@ -98,16 +97,6 @@ def _test_callbacks(canvas):
         backend._on_event(event)
         event.type = 769  # SDL_KEYUP
         backend._on_event(event)
-    elif 'glut' in backend_name.lower():
-        backend.on_mouse_action(0, 0, 0, 0)
-        backend.on_mouse_action(0, 1, 0, 0)
-        backend.on_mouse_action(3, 0, 0, 0)
-        backend.on_draw()
-        backend.on_mouse_motion(1, 1)
-        # Skip keypress tests b/c of glutGetModifiers warning
-        #for key in (100, 'a'):
-        #    backend.on_key_press(key, 0, 0)
-        #    backend.on_key_release(key, 0, 0)
     elif 'wx' in backend_name.lower():
         # Constructing fake wx events is too hard
         pass
@@ -118,9 +107,6 @@ def _test_callbacks(canvas):
 @requires_application()
 def test_run():
     """Test app running"""
-    a = use_app()
-    if a.backend_name.lower() == 'glut':
-        raise SkipTest('cannot test running glut')  # knownfail
     for _ in range(2):
         with Canvas(size=(100, 100), show=True, title='run') as c:
             @c.events.draw.connect
@@ -163,7 +149,7 @@ def test_application():
     app = use_app()
     print(app)  # __repr__ without app
     app.create()
-    wrong = 'glut' if app.backend_name.lower() != 'glut' else 'pyglet'
+    wrong = 'glfw' if app.backend_name.lower() != 'glfw' else 'pyqt4'
     assert_raises(RuntimeError, use_app, wrong)
     app.process_events()
     print(app)  # test __repr__
@@ -179,6 +165,7 @@ def test_application():
     title = 'default'
     with Canvas(title=title, size=size, app=app, show=True,
                 position=pos) as canvas:
+        context = canvas.context
         assert_true(canvas.create_native() is None)  # should be done already
         assert_is(canvas.app, app)
         assert_true(canvas.native)
@@ -230,43 +217,30 @@ def test_application():
         ss = _screenshot()
         assert_array_equal(ss.shape, size + (4,))
         assert_equal(len(canvas._backend._vispy_get_geometry()), 4)
-        if (app.backend_name.lower() != 'glut' and  # XXX knownfail for Almar
-                sys.platform != 'win32'):  # XXX knownfail for windows
+        if sys.platform != 'win32':  # XXX knownfail for windows
             assert_array_equal(canvas.size, size)
         assert_equal(len(canvas.position), 2)  # XXX knawnfail, doesn't "take"
 
         # GLOO: should have an OpenGL context already, so these should work
-        vert = VertexShader("void main (void) {gl_Position = pos;}")
-        frag = FragmentShader("void main (void) {gl_FragColor = pos;}")
+        vert = "void main (void) {gl_Position = pos;}"
+        frag = "void main (void) {gl_FragColor = pos;}"
         program = Program(vert, frag)
-        assert_raises(RuntimeError, program.activate)
-
-        vert = VertexShader("uniform vec4 pos;"
-                            "void main (void) {gl_Position = pos;}")
-        frag = FragmentShader("uniform vec4 pos;"
-                              "void main (void) {gl_FragColor = pos;}")
+        assert_raises(RuntimeError, program.glir.flush, context.shared.parser)
+        
+        vert = "uniform vec4 pos;\nvoid main (void) {gl_Position = pos;}"
+        frag = "uniform vec4 pos;\nvoid main (void) {gl_FragColor = pos;}"
         program = Program(vert, frag)
-        #uniform = program.uniforms[0]
+        # uniform = program.uniforms[0]
         program['pos'] = [1, 2, 3, 4]
-        program.activate()  # should print
-        #uniform.upload(program)
-        program.detach(vert)
-        program.detach(frag)
-        assert_raises(RuntimeError, program.detach, vert)
-        assert_raises(RuntimeError, program.detach, frag)
-
-        vert = VertexShader("attribute vec4 pos;"
-                            "void main (void) {gl_Position = pos;}")
-        frag = FragmentShader("void main (void) {}")
+        
+        vert = "attribute vec4 pos;\nvoid main (void) {gl_Position = pos;}"
+        frag = "void main (void) {}"
         program = Program(vert, frag)
-        #attribute = program.attributes[0]
+        # attribute = program.attributes[0]
         program["pos"] = [1, 2, 3, 4]
-        program.activate()
-        #attribute.upload(program)
-        # cannot get element count
-        #assert_raises(RuntimeError, program.draw, 'POINTS')
-
+        
         # use a real program
+        program._glir.clear()
         vert = ("uniform mat4 u_model;"
                 "attribute vec2 a_position; attribute vec4 a_color;"
                 "varying vec4 v_color;"
@@ -296,10 +270,9 @@ def test_application():
         # bad programs
         frag_bad = ("varying vec4 v_colors")  # no semicolon
         program = Program(vert, frag_bad)
-        assert_raises(RuntimeError, program.activate)
+        assert_raises(RuntimeError, program.glir.flush, context.shared.parser)
         frag_bad = None  # no fragment code. no main is not always enough
-        program = Program(vert, frag_bad)
-        assert_raises(ValueError, program.activate)
+        assert_raises(ValueError, Program, vert, frag_bad)
 
         # Timer
         timer = Timer(interval=0.001, connect=on_mouse_move, iterations=2,

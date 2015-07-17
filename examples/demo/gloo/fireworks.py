@@ -14,8 +14,11 @@ calculated, such that each explostion is unique.
 
 import time
 import numpy as np
-from vispy import gloo
-from vispy import app
+from vispy import gloo, app
+
+# import vispy
+# vispy.use('pyside', 'es2')
+
 
 # Create a texture
 radius = 32
@@ -37,7 +40,6 @@ data = np.zeros(N, [('a_lifetime', np.float32, 1),
 
 
 VERT_SHADER = """
-#version 120
 uniform float u_time;
 uniform vec3 u_centerPosition;
 attribute float a_lifetime;
@@ -62,17 +64,17 @@ void main () {
 }
 """
 
+# Deliberately add precision qualifiers to test automatic GLSL code conversion
 FRAG_SHADER = """
-#version 120
-
+precision highp float;
 uniform sampler2D texture1;
 uniform vec4 u_color;
 varying float v_lifetime;
-uniform sampler2D s_texture;
+uniform highp sampler2D s_texture;
 
 void main()
 {
-    vec4 texColor;
+    highp vec4 texColor;
     texColor = texture2D(s_texture, gl_PointCoord);
     gl_FragColor = vec4(u_color) * texColor;
     gl_FragColor.a *= v_lifetime;
@@ -83,8 +85,7 @@ void main()
 class Canvas(app.Canvas):
 
     def __init__(self):
-        app.Canvas.__init__(self, keys='interactive')
-        self.size = 800, 600
+        app.Canvas.__init__(self, keys='interactive', size=(800, 600))
 
         # Create program
         self._program = gloo.Program(VERT_SHADER, FRAG_SHADER)
@@ -93,16 +94,19 @@ class Canvas(app.Canvas):
 
         # Create first explosion
         self._new_explosion()
-        
-        self._timer = app.Timer('auto', connect=self.update, start=True)
-    
-    def on_initialize(self, event):
+
         # Enable blending
         gloo.set_state(blend=True, clear_color='black',
                        blend_func=('src_alpha', 'one'))
 
+        gloo.set_viewport(0, 0, self.physical_size[0], self.physical_size[1])
+
+        self._timer = app.Timer('auto', connect=self.update, start=True)
+
+        self.show()
+
     def on_resize(self, event):
-        width, height = event.size
+        width, height = event.physical_size
         gloo.set_viewport(0, 0, width, height)
 
     def on_draw(self, event):
@@ -141,5 +145,4 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     app.run()

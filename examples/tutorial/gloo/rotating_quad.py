@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author: Nicolas P .Rougier
@@ -39,15 +39,20 @@ class Canvas(app.Canvas):
                             keys='interactive')
         self.timer = app.Timer('auto', self.on_timer)
 
-    def on_initialize(self, event):
         # Build program & data
         self.program = Program(vertex, fragment, count=4)
         self.program['color'] = [(1, 0, 0, 1), (0, 1, 0, 1),
                                  (0, 0, 1, 1), (1, 1, 0, 1)]
         self.program['position'] = [(-1, -1), (-1, +1),
                                     (+1, -1), (+1, +1)]
+        self.program['theta'] = 0.0
+
+        gloo.set_viewport(0, 0, *self.physical_size)
+
         self.clock = 0
         self.timer.start()
+
+        self.show()
 
     def on_draw(self, event):
         gloo.set_clear_color('white')
@@ -55,7 +60,7 @@ class Canvas(app.Canvas):
         self.program.draw('triangle_strip')
 
     def on_resize(self, event):
-        gloo.set_viewport(0, 0, *event.size)
+        gloo.set_viewport(0, 0, *event.physical_size)
 
     def on_timer(self, event):
         self.clock += 0.001 * 1000.0 / 60.
@@ -64,5 +69,4 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     c = Canvas()
-    c.show()
     app.run()

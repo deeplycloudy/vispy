@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-# vispy: gallery 1
+# vispy: gallery 10
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 """
@@ -71,8 +71,6 @@ uniform float vmax;
 uniform float cmap;
 
 uniform sampler2D image;
-uniform vec2 image_shape;
-
 uniform sampler2D colormaps;
 uniform vec2 colormaps_shape;
 
@@ -97,6 +95,8 @@ void main()
 
 class Canvas(app.Canvas):
     def __init__(self):
+        app.Canvas.__init__(self, size=(512, 512),
+                            keys='interactive')
         self.image = Program(img_vertex, img_fragment, 4)
         self.image['position'] = (-1, -1), (-1, +1), (+1, -1), (+1, +1)
         self.image['texcoord'] = (0, 0), (0, +1), (+1, 0), (+1, +1)
@@ -108,18 +108,16 @@ class Canvas(app.Canvas):
         self.image['colormaps'].interpolation = 'linear'
         self.image['colormaps_shape'] = colormaps.shape[1], colormaps.shape[0]
 
-        self.image['image'] = I
+        self.image['image'] = I.astype('float32')
         self.image['image'].interpolation = 'linear'
-        self.image['image_shape'] = I.shape[1], I.shape[0]
-        app.Canvas.__init__(self, show=True, size=(512, 512),
-                            keys='interactive')
 
-    def on_initialize(self, event):
         set_clear_color('black')
 
+        self.show()
+
     def on_resize(self, event):
-        width, height = event.size
-        set_viewport(0, 0, *event.size)
+        width, height = event.physical_size
+        set_viewport(0, 0, *event.physical_size)
 
     def on_draw(self, event):
         clear(color=True, depth=True)

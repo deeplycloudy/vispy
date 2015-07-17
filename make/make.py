@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for mo
 
 """
@@ -79,6 +79,7 @@ class Maker:
         from coverage import coverage
         cov = coverage(auto_data=False, branch=True, data_suffix=None,
                        source=['vispy'])  # should match testing/_coverage.py
+        cov.combine()
         cov.load()
         cov.html_report()
         print('Done, launching browser.')
@@ -153,7 +154,11 @@ class Maker:
         # Go
         if 'html' == arg:
             sphinx_clean(build_dir)
-            sphinx_build(WEBSITE_DIR, build_dir)
+            try:
+                sphinx_build(WEBSITE_DIR, build_dir)
+            except SystemExit as err:
+                if err.code:
+                    raise
             sphinx_copy_pages(html_dir, PAGES_DIR, PAGES_REPO)
         elif 'show' == arg:
             sphinx_show(PAGES_DIR)
@@ -168,20 +173,26 @@ class Maker:
     def test(self, arg):
         """ Run tests:
                 * full - run all tests
-                * nose - run nose tests (also for each backend)
-                * any backend name (e.g. pyside, pyqt4, glut, sdl2, etc.) -
+                * unit - run tests (also for each backend)
+                * any backend name (e.g. pyside, pyqt4, etc.) -
                   run tests for the given backend
                 * nobackend - run tests that do not require a backend
                 * extra - run extra tests (line endings and style)
                 * lineendings - test line ending consistency
                 * flake - flake style testing (PEP8 and more)
+                * docs - test docstring parameters for correctness
+                * examples - run all examples
+                * examples [examples paths] - run given examples
         """
+        # Note: By default, "python make full" *will* produce coverage data,
+        # whereas vispy.test('full') will not. This is because users won't
+        # really care about coveraged, but developers will.
         if not arg:
             return self.help('test')
         from vispy import test
         try:
             args = arg.split(' ')
-            test(args[0], ' '.join(args[1:]))
+            test(args[0], ' '.join(args[1:]), coverage=True)
         except Exception as err:
             print(err)
             if not isinstance(err, RuntimeError):
@@ -310,8 +321,11 @@ class Maker:
                 c = m.canvas  # scene examples
             elif hasattr(m, 'Canvas'):
                 c = m.Canvas()
+            elif hasattr(m, 'fig'):
+                c = m.fig
             else:
                 print('Ignore: %s, no canvas' % name)
+                continue
             c.events.draw.connect(grabscreenshot)
             # Show it and draw as many frames as needed
             with c:

@@ -11,13 +11,17 @@ class Rect(object):
         Can be in the form `Rect(x, y, w, h)`, `Rect(pos, size)`, or
         `Rect(Rect)`.
     """
-    def __init__(self, *args, **kwds):
+    def __init__(self, *args, **kwargs):
         self._pos = (0, 0)
         self._size = (0, 0)
 
         if len(args) == 1 and isinstance(args[0], Rect):
             self._pos = args[0]._pos
             self._size = args[0]._size
+        elif (len(args) == 1 and isinstance(args[0], (list, tuple)) and
+              len(args[0]) == 4):
+            self._pos = args[0][:2]
+            self._size = args[0][2:]
         elif len(args) == 2:
             self._pos = tuple(args[0])
             self._size = tuple(args[1])
@@ -28,8 +32,8 @@ class Rect(object):
             raise TypeError("Rect must be instantiated with 0, 1, 2, or 4 "
                             "non-keyword arguments.")
 
-        self._pos = kwds.get('pos', self._pos)
-        self._size = kwds.get('size', self._size)
+        self._pos = kwargs.get('pos', self._pos)
+        self._size = kwargs.get('size', self._size)
 
         if len(self._pos) != 2 or len(self._size) != 2:
             raise ValueError("Rect pos and size arguments must have 2 "
@@ -104,7 +108,18 @@ class Rect(object):
         self.size = (self.size[0], y - self.pos[1])
 
     def padded(self, padding):
-        """Return a new Rect padded (smaller) by *padding* on all sides."""
+        """Return a new Rect padded (smaller) by padding on all sides
+
+        Parameters
+        ----------
+        padding : float
+            The padding.
+
+        Returns
+        -------
+        rect : instance of Rect
+            The padded rectangle.
+        """
         return Rect(pos=(self.pos[0]+padding, self.pos[1]+padding),
                     size=(self.size[0]-2*padding, self.size[1]-2*padding))
 
@@ -116,8 +131,19 @@ class Rect(object):
                     size=(abs(self.width), abs(self.height)))
 
     def flipped(self, x=False, y=True):
-        """ Return a Rect with the same bounds, but with the x or y axes 
-        inverted.
+        """Return a Rect with the same bounds but with axes inverted
+
+        Parameters
+        ----------
+        x : bool
+            Flip the X axis.
+        y : bool
+            Flip the Y axis.
+
+        Returns
+        -------
+        rect : instance of Rect
+            The flipped rectangle.
         """
         pos = list(self.pos)
         size = list(self.size)
@@ -139,6 +165,20 @@ class Rect(object):
         return self._transform_out(self._transform_in()[:, :2] + a[:2])
 
     def contains(self, x, y):
+        """Query if the rectangle contains points
+
+        Parameters
+        ----------
+        x : float
+            X coordinate.
+        y : float
+            Y coordinate.
+
+        Returns
+        -------
+        contains : bool
+            True if the point is within the rectangle.
+        """
         return (x >= self.left and x <= self.right and
                 y >= self.bottom and y <= self.top)
 

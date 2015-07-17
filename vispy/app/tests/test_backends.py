@@ -10,11 +10,10 @@ implementation is corect.
 
 from inspect import getargspec
 
-from nose.tools import assert_raises
-
 import vispy
 from vispy import keys
-from vispy.testing import requires_application, assert_in, run_tests_if_main
+from vispy.testing import (requires_application, assert_in, run_tests_if_main,
+                           assert_raises)
 from vispy.app import use_app, Application
 from vispy.app.backends import _template
 
@@ -51,12 +50,17 @@ def _test_module_properties(_module=None):
         '_vispy_get_native_canvas',
         '_vispy_get_native_timer',
         '_vispy_get_native_app',
+        '_vispy_reuse',
         '_vispy_mouse_move',
         '_vispy_mouse_press',
         '_vispy_mouse_release',
+        '_vispy_mouse_double_click',
+        '_vispy_detect_double_click',
         '_vispy_get_geometry',
+        '_vispy_get_physical_size',
+        '_vispy_sleep',
         '_process_backend_kwargs')  # defined in base class
-    
+
     class KlassRef(vispy.app.base.BaseCanvasBackend):
         def __init__(self, *args, **kwargs):
             pass  # Do not call the base class, since it will check for Canvas
@@ -115,7 +119,8 @@ def _test_module_properties(_module=None):
     # Stylus and touch are ignored because they are not yet implemented.
     # Mouse events are emitted from the CanvasBackend base class.
     ignore = set(['stylus', 'touch', 'mouse_press', 'paint',
-                  'mouse_move', 'mouse_release', 'close'])
+                  'mouse_move', 'mouse_release', 'mouse_double_click',
+                  'detect_double_click', 'close'])
     if module_fname == '_egl':
         ignore += ['key_release', 'key_press']
     eventNames = set(canvas.events._emitters.keys()) - ignore
@@ -135,7 +140,7 @@ def test_template():
     for method in (a._vispy_process_events, a._vispy_run, a._vispy_quit,
                    a._vispy_get_native_app):
         assert_raises(NotImplementedError, method)
-    
+
     class TemplateCanvasBackend(_template.CanvasBackend):
         def __init__(self, *args, **kwargs):
             pass  # Do not call the base class, since it will check for Canvas

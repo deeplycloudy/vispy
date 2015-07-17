@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014, Vispy Development Team.
+# Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 
 from __future__ import division
@@ -31,7 +31,7 @@ class Timer(object):
         The application to attach the timer to.
     """
 
-    def __init__(self, interval='auto', connect=None, iterations=-1, 
+    def __init__(self, interval='auto', connect=None, iterations=-1,
                  start=False, app=None):
         self.events = EmitterGroup(source=self,
                                    start=Event,
@@ -42,20 +42,20 @@ class Timer(object):
 
         # Get app instance
         if app is None:
-            self._app = use_app()
+            self._app = use_app(call_reuse=False)
         elif isinstance(app, Application):
             self._app = app
         elif isinstance(app, string_types):
             self._app = Application(app)
         else:
             raise ValueError('Invalid value for app %r' % app)
-        
+
         # Ensure app has backend app object
         self._app.native
-        
+
         # Instantiate the backed with the right class
         self._backend = self._app.backend_module.TimerBackend(self)
-        
+
         if interval == 'auto':
             interval = 1.0 / 60
         self._interval = float(interval)
@@ -104,7 +104,14 @@ class Timer(object):
         emitting that number of events. If unspecified, then
         the previous value of self.iterations will be used. If the value is
         negative, then the timer will continue running until stop() is called.
+
+        If the timer is already running when this function is called, nothing
+        happens (timer continues running as it did previously, without
+        changing the interval, number of iterations, or emitting a timer
+        start event).
         """
+        if self.running:
+            return  # don't do anything if already running
         self.iter_count = 0
         if interval is not None:
             self.interval = interval
@@ -157,7 +164,8 @@ class Timer(object):
             type='timer_timeout',
             iteration=self.iter_count,
             elapsed=elapsed,
-            dt=dt)
+            dt=dt,
+            count=self.iter_count)
         self.iter_count += 1
 
     def connect(self, callback):

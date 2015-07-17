@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 200
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 # Author:   Nicolas P .Rougier
@@ -14,8 +14,8 @@ Conway game of life.
 """
 
 import numpy as np
-from vispy.gloo import (Program, FrameBuffer, DepthBuffer, clear, set_viewport,
-                        set_state)
+from vispy.gloo import (Program, FrameBuffer, RenderBuffer,
+                        clear, set_viewport, set_state)
 from vispy import app
 
 
@@ -111,12 +111,10 @@ class Canvas(app.Canvas):
     def __init__(self):
         app.Canvas.__init__(self, title="Conway game of life",
                             size=(512, 512), keys='interactive')
-        self._timer = app.Timer('auto', connect=self.update, start=True)
-    
-    def on_initialize(self, event):
+
         # Build programs
         # --------------
-        self.comp_size = (512, 512)
+        self.comp_size = self.size
         size = self.comp_size + (4,)
         Z = np.zeros(size, dtype=np.float32)
         Z[...] = np.random.randint(0, 2, size)
@@ -156,8 +154,12 @@ class Canvas(app.Canvas):
         self.render['pingpong'] = self.pingpong
 
         self.fbo = FrameBuffer(self.compute["texture"],
-                               DepthBuffer(self.comp_size))
+                               RenderBuffer(self.comp_size))
         set_state(depth_test=False, clear_color='black')
+
+        self._timer = app.Timer('auto', connect=self.update, start=True)
+
+        self.show()
 
     def on_draw(self, event):
         with self.fbo:
@@ -165,18 +167,14 @@ class Canvas(app.Canvas):
             self.compute["texture"].interpolation = 'nearest'
             self.compute.draw('triangle_strip')
         clear()
-        set_viewport(0, 0, *self.size)
+        set_viewport(0, 0, *self.physical_size)
         self.render["texture"].interpolation = 'linear'
         self.render.draw('triangle_strip')
         self.pingpong = 1 - self.pingpong
         self.compute["pingpong"] = self.pingpong
         self.render["pingpong"] = self.pingpong
 
-    def on_reshape(self, event):
-        set_viewport(0, 0, *event.size)
-
 
 if __name__ == '__main__':
     canvas = Canvas()
-    canvas.show()
     app.run()

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # vispy: gallery 300
 # -----------------------------------------------------------------------------
-# Copyright (c) 2014, Vispy Development Team. All Rights Reserved.
+# Copyright (c) 2015, Vispy Development Team. All Rights Reserved.
 # Distributed under the (new) BSD License. See LICENSE.txt for more info.
 # -----------------------------------------------------------------------------
 
@@ -42,7 +42,6 @@ const int PLANE = 1;
 const int SPHERE_0 = 2;
 const int SPHERE_1 = 3;
 
-uniform float u_time;
 uniform float u_aspect_ratio;
 varying vec2 v_position;
 
@@ -105,7 +104,7 @@ float intersect_plane(vec3 O, vec3 D, vec3 P, vec3 N) {
     return d;
 }
 
-vec3 run(float x, float y, float t) {
+vec3 run(float x, float y) {
     vec3 Q = vec3(x, y, 0.);
     vec3 D = normalize(Q - O);
     int depth = 0;
@@ -115,22 +114,22 @@ vec3 run(float x, float y, float t) {
     vec3 col = vec3(0.0, 0.0, 0.0);
     vec3 col_ray;
     float reflection = 1.;
-    
+
     int object_index;
     vec3 object_color;
     vec3 object_normal;
     float object_reflection;
     vec3 M;
     vec3 N, toL, toO;
-    
+
     while (depth < 5) {
-        
+
         /* start trace_ray */
-        
+
         t_plane = intersect_plane(rayO, rayD, plane_position, plane_normal);
         t0 = intersect_sphere(rayO, rayD, sphere_position_0, sphere_radius_0);
         t1 = intersect_sphere(rayO, rayD, sphere_position_1, sphere_radius_1);
-        
+
         if (t_plane < min(t0, t1)) {
             // Plane.
             M = rayO + rayD * t_plane;
@@ -164,86 +163,91 @@ vec3 run(float x, float y, float t) {
         else {
             break;
         }
-        
+
         N = object_normal;
         toL = normalize(light_position - M);
         toO = normalize(O - M);
-        
+
         // Shadow of the spheres on the plane.
         if (object_index == PLANE) {
-            t0 = intersect_sphere(M + N * .0001, toL, 
+            t0 = intersect_sphere(M + N * .0001, toL,
                                   sphere_position_0, sphere_radius_0);
-            t1 = intersect_sphere(M + N * .0001, toL, 
+            t1 = intersect_sphere(M + N * .0001, toL,
                                   sphere_position_1, sphere_radius_1);
             if (min(t0, t1) < INFINITY) {
                 break;
             }
         }
-        
+
         col_ray = vec3(ambient, ambient, ambient);
         col_ray += light_intensity * max(dot(N, toL), 0.) * object_color;
-        col_ray += light_specular.x * light_color * 
+        col_ray += light_specular.x * light_color *
             pow(max(dot(N, normalize(toL + toO)), 0.), light_specular.y);
-        
+
         /* end trace_ray */
-        
+
         rayO = M + N * .0001;
         rayD = normalize(rayD - 2. * dot(rayD, N) * N);
         col += reflection * col_ray;
         reflection *= object_reflection;
-        
+
         depth++;
     }
-    
+
     return clamp(col, 0., 1.);
 }
 
 void main() {
     vec2 pos = v_position;
-    gl_FragColor = vec4(run(pos.x*u_aspect_ratio, pos.y, u_time), 1.);
+    gl_FragColor = vec4(run(pos.x*u_aspect_ratio, pos.y), 1.);
 }
 """
 
 
 class Canvas(app.Canvas):
     def __init__(self):
-        app.Canvas.__init__(self, position=(300, 100), 
+        app.Canvas.__init__(self, position=(300, 100),
                             size=(800, 600), keys='interactive')
-        
+
         self.program = gloo.Program(vertex, fragment)
         self.program['a_position'] = [(-1., -1.), (-1., +1.),
                                       (+1., -1.), (+1., +1.)]
-
         self.program['sphere_position_0'] = (.75, .1, 1.)
         self.program['sphere_radius_0'] = .6
         self.program['sphere_color_0'] = (0., 0., 1.)
-        
+
         self.program['sphere_position_1'] = (-.75, .1, 2.25)
         self.program['sphere_radius_1'] = .6
         self.program['sphere_color_1'] = (.5, .223, .5)
 
         self.program['plane_position'] = (0., -.5, 0.)
         self.program['plane_normal'] = (0., 1., 0.)
-        
+
         self.program['light_intensity'] = 1.
         self.program['light_specular'] = (1., 50.)
         self.program['light_position'] = (5., 5., -10.)
         self.program['light_color'] = (1., 1., 1.)
         self.program['ambient'] = .05
         self.program['O'] = (0., 0., -1.)
-                                      
+
+        self.activate_zoom()
+
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
-    
+
+        self.show()
+
     def on_timer(self, event):
         t = event.elapsed
-        self.program['u_time'] = t
         self.program['sphere_position_0'] = (+.75, .1, 2.0 + 1.0 * cos(4*t))
         self.program['sphere_position_1'] = (-.75, .1, 2.0 - 1.0 * cos(4*t))
         self.update()
 
     def on_resize(self, event):
-        width, height = event.size
-        gloo.set_viewport(0, 0, width, height)
+        self.activate_zoom()
+
+    def activate_zoom(self):
+        width, height = self.size
+        gloo.set_viewport(0, 0, *self.physical_size)
         self.program['u_aspect_ratio'] = width/float(height)
 
     def on_draw(self, event):
@@ -251,5 +255,4 @@ class Canvas(app.Canvas):
 
 if __name__ == '__main__':
     canvas = Canvas()
-    canvas.show()
     app.run()
