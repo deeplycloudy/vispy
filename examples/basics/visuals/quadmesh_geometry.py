@@ -6,9 +6,9 @@ pi = np.pi
 
 import vispy.app
 # from vispy.scene.visuals.modular_mesh import ModularMesh
-from vispy.scene.visuals.mesh import Mesh
+from vispy.scene.visuals import Mesh
 from vispy.geometry import MeshData
-from vispy.scene.transforms import (STTransform, AffineTransform)
+from vispy.scene import (STTransform, AffineTransform)
 
 def synthetic_field(x,y):
     # Trapp and Doswell (2000, Mon. Weather Rev.) analytic input field    
@@ -146,7 +146,11 @@ class Canvas(vispy.scene.SceneCanvas):
         self.size = (800, 800)
         self.show()
         view = self.central_widget.add_view()
-        view.set_camera('turntable', mode='ortho', up='z', distance=2)
+        # view.set_camera('turntable', mode='ortho', up='z', distance=2)
+        view.camera='turntable'
+        view.camera.mode='ortho'
+        view.camera.up='z'
+        view.camera.distance=20
         view.add(mesh)
 
 
