@@ -43,7 +43,9 @@ class SurfacePlotVisual(MeshVisual):
         self._y = None
         self._z = None
         self.__vertices = None
+        self.__faces = None
         self.__meshdata = MeshData()
+        kwargs.setdefault('shading', 'smooth')
         MeshVisual.__init__(self, **kwargs)
         self.set_data(x, y, z, colors)
 
@@ -83,16 +85,13 @@ class SurfacePlotVisual(MeshVisual):
                     self._z.shape != self.__vertices.shape[:2]):
                 self.__vertices = None
 
-        if colors is not None:
-            self.__meshdata.set_vertex_colors(colors)
-
         if self._z is None:
             return
 
         update_mesh = False
         new_vertices = False
 
-        ## Generate vertex and face array
+        # Generate vertex and face array
         if self.__vertices is None:
             new_vertices = True
             self.__vertices = np.empty((self._z.shape[0], self._z.shape[1], 3),
@@ -101,7 +100,7 @@ class SurfacePlotVisual(MeshVisual):
             self.__meshdata.set_faces(self.__faces)
             update_mesh = True
 
-        ## Copy x, y, z data into vertex array
+        # Copy x, y, z data into vertex array
         if new_vertices or x is not None:
             if x is None:
                 if self._x is None:
@@ -124,7 +123,11 @@ class SurfacePlotVisual(MeshVisual):
             self.__vertices[..., 2] = self._z
             update_mesh = True
 
-        ## Update MeshData
+        if colors is not None:
+            self.__meshdata.set_vertex_colors(colors)
+            update_mesh = True
+
+        # Update MeshData
         if update_mesh:
             self.__meshdata.set_vertices(
                 self.__vertices.reshape(self.__vertices.shape[0] *

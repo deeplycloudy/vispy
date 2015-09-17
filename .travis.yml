@@ -28,13 +28,13 @@ matrix:
 
     # IPython 1.2.1 is the last version of IPython for python2.6
     # source: https://pypi.python.org/pypi/ipython/1.2.1
-    - env: PYTHON=2.6 DEPS=full TEST=standard   # functionality
+    - env: PYTHON=2.6 DEPS=full TEST=standard # functionality
       addons:
         apt:
           sources:
           packages:
             - *mesa_apt
-    - env: PYTHON=2.7 DEPS=full TEST=standard IPYTHON="=2" # NUMPY="=1.7"
+    - env: PYTHON=2.7 DEPS=full TEST=standard IPYTHON="=2" NUMPY="=1.7"
       addons:
         apt:
           sources:
@@ -129,7 +129,7 @@ install:
           conda install --yes --quiet ipython$IPYTHON ipython-notebook numpy$NUMPY > ${REDIRECT_TO};
         fi;
         if [ "${PYTHON}" == "3.4" ]; then
-          pip install -q husl pypng https://github.com/mpld3/mplexporter/zipball/master > ${REDIRECT_TO};
+          pip install -q freetype-py husl pypng https://github.com/mpld3/mplexporter/zipball/master > ${REDIRECT_TO};
           conda install --yes --quiet pillow scipy matplotlib decorator six numpy$NUMPY > ${REDIRECT_TO};
           rm -rf ${SRC_DIR}/vispy/ext/_bundled;
         fi;

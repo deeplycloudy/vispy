@@ -140,8 +140,8 @@ class raises(object):
             raise AssertionError("Expected %s (no exception raised)" %
                                  self.exc.__name__)
         else:
-            raise AssertionError("Expected %s, got %s instead" %
-                                 (self.exc.__name__, type(exc).__name__))
+            raise AssertionError("Expected %s, got %s instead (%s)" %
+                                 (self.exc.__name__, type(exc).__name__), exc)
 
 
 ###############################################################################
@@ -318,6 +318,7 @@ def TestingCanvas(bgcolor='black', size=(100, 100), dpi=None, decorate=False,
     class TestingCanvas(SceneCanvas):
         def __init__(self, bgcolor, size, dpi, decorate, **kwargs):
             self._entered = False
+            self._wanted_vp = None
             SceneCanvas.__init__(self, bgcolor=bgcolor, size=size,
                                  dpi=dpi, decorate=decorate,
                                  **kwargs)
@@ -335,15 +336,10 @@ def TestingCanvas(bgcolor='black', size=(100, 100), dpi=None, decorate=False,
             self._entered = True
             return self
 
-        def draw_visual(self, visual, event=None, viewport=None, clear=True):
+        def draw_visual(self, visual, event=None):
             if not self._entered:
                 return
-            if clear:
-                self.context.clear()
-            SceneCanvas.draw_visual(self, visual, event, viewport)
-            # must set this because draw_visual sets it back to the
-            # canvas size when it's done
-            self.context.set_viewport(*self._wanted_vp)
+            SceneCanvas.draw_visual(self, visual, event)
             self.context.finish()
 
     return TestingCanvas(bgcolor, size, dpi, decorate, **kwargs)
